@@ -30,16 +30,16 @@ __all__ = [
 
 
 class AbstractBoltzmannMachine(ABC, torch.nn.Module):
+    """Abstract class for Boltzmann machines.
+
+    Args:
+        h_range (tuple[float, float], optional): range of linear weights. Defaults to None.
+        j_range (tuple[float, float], optional): range of quadratic weights. Defaults to None.
+    """
 
     def __init__(
         self, h_range: tuple[float, float] = None, j_range: tuple[float, float] = None
     ) -> None:
-        """Abstract class for Boltzmann machines.
-
-        Args:
-            h_range (tuple[float, float], optional): range of linear weights. Defaults to None.
-            j_range (tuple[float, float], optional): range of quadratic weights. Defaults to None.
-        """
         super().__init__()
 
         self.register_buffer(
@@ -62,7 +62,8 @@ class AbstractBoltzmannMachine(ABC, torch.nn.Module):
     def sufficient_statistics(
         self, x: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Calculate the average spin and average interaction values (per edge) of `x`.
+        """Compute the sufficient statistics of a Boltzmann machine, i.e., average spin
+        and average interaction values (per edge) of `x`.
 
         Args:
             x (torch.Tensor): a tensor of shape (..., N)
