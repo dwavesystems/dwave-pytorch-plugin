@@ -31,7 +31,9 @@ __all__ = [
 
 class AbstractBoltzmannMachine(ABC, torch.nn.Module):
 
-    def __init__(self, h_range=None, j_range=None) -> None:
+    def __init__(
+        self, h_range: tuple[float, float] = None, j_range: tuple[float, float] = None
+    ) -> None:
         """Abstract class for Boltzmann machines.
 
         Args:
@@ -57,8 +59,17 @@ class AbstractBoltzmannMachine(ABC, torch.nn.Module):
         self.register_forward_pre_hook(lambda *args: self.clip_parameters())
 
     @abstractmethod
-    def average_spinteractions(self, x):
-        """Calculate the average spin and average interaction values (per edge) of `x`."""
+    def average_sufficient_statistics(
+        self, x: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Calculate the average spin and average interaction values (per edge) of `x`.
+
+        Args:
+            x (torch.Tensor): a tensor of shape (..., N)
+
+        Returns:
+            tuple[torch.Tensor, torch.Tensor]: the average spin and average spin-spin of `x`.
+        """
 
     def clip_parameters(self):
         """Clips linear and quadratic bias weights in-place."""
@@ -66,7 +77,7 @@ class AbstractBoltzmannMachine(ABC, torch.nn.Module):
         self.get_parameter("J").data.clamp_(*self.j_range)
 
     @property
-    def ising(self):
+    def ising(self) -> tuple[dict, dict]:
         """Converts the model to Ising format."""
         self.clip_parameters()
         return self._ising
@@ -77,21 +88,38 @@ class AbstractBoltzmannMachine(ABC, torch.nn.Module):
         """Convert the model to Ising format"""
 
     @staticmethod
-    def pairwise_matrix(x):
+    def pairwise_matrix(x: torch.Tensor) -> torch.Tensor:
         """Computes a matrix whose off-diagonals are average spin-spin interactions and
-        diagonal is the average spin."""
+        diagonal is the average spin.
+
+        Args:
+            x (torch.Tensor): A tensor with shape (batch, N)
+
+        Returns:
+            torch.Tensor: the pairwise matrix with shape (batch, N, N)
+        """
         mtx = torch.bmm(x.unsqueeze(2), x.unsqueeze(1)).mean(0)
         mtx = mtx - torch.diag(mtx.diagonal()) + torch.diag(x.mean(0))
         return mtx
 
-    def objective(self, s_observed, s_model):
+    def objective(
+        self, s_observed: torch.Tensor, s_model: torch.Tensor
+    ) -> torch.Tensor:
         """An objective function with gradients equivalent to the gradients of the
-        negative log likelihood."""
+        negative log likelihood.
+
+        Args:
+            s_observed (torch.Tensor): tensor of observed (data) spins with shape (b1, N)
+            s_model (torch.Tensor): tensor of spins drawn from the model with shape (b2, N)
+
+        Returns:
+            torch.Tensor: a scalar; difference of the average energies between the two samples
+        """
         self.clip_parameters()
         return self(s_observed).mean() - self(s_model).mean()
 
     def sample(
-        self, sampler: Sampler, device=None, **sample_params: dict
+        self, sampler: Sampler, device: str = None, **sample_params: dict
     ) -> torch.Tensor:
         """Sample from the Boltzmann machine.
         This method converts the sampled spins to tensors and ensures they are not
@@ -113,6 +141,17 @@ class AbstractBoltzmannMachine(ABC, torch.nn.Module):
 
 
 class GraphRestrictedBoltzmannMachine(AbstractBoltzmannMachine):
+    """Creates a graph-restricted Boltzmann machine.
+
+    Args:
+        num_nodes (int): number of variables in the model.
+        edge_idx_i (torch.Tensor): list of endpoints i of a list of edges.
+        edge_idx_j (torch.Tensor): list of endpoints j of a list of edges.
+        h_range (tuple[float, float], optional): range of linear weights. Defaults to None.
+        j_range (tuple[float, float], optional): range of quadratic weights. Defaults to None.
+
+    """
+
     def __init__(
         self,
         num_nodes,
@@ -122,18 +161,6 @@ class GraphRestrictedBoltzmannMachine(AbstractBoltzmannMachine):
         h_range: tuple = None,
         j_range: tuple = None,
     ):
-        """Creates a graph-restricted Boltzmann machine.
-
-        Args:
-            num_nodes (int): number of variables in the model.
-            edge_idx_i (torch.Tensor): list of endpoints i of a list of edges.
-            edge_idx_j (torch.Tensor): list of endpoints j of a list of edges.
-            h_range (tuple[float, float], optional): range of linear weights. Defaults to None.
-            j_range (tuple[float, float], optional): range of quadratic weights. Defaults to None.
-
-        Raises:
-            NotImplementedError: _description_
-        """
         super().__init__(h_range=h_range, j_range=j_range)
 
         number_of_interactions = len(edge_idx_i)
@@ -155,18 +182,18 @@ class GraphRestrictedBoltzmannMachine(AbstractBoltzmannMachine):
         self.register_buffer("edge_idx_i", edge_idx_i)
         self.register_buffer("edge_idx_j", edge_idx_j)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Evaluates the Hamiltonian.
 
         Args:
-            x (torch.tensor): a tensor of shape (batch_size, number_of_variables)
+            x (torch.tensor): a tensor of shape (B, N)
 
         Returns:
-            torch.tensor: Hamiltonians of shape (batch_size)
+            torch.tensor: Hamiltonians of shape (B,)
         """
         return x @ self.h + self.interactions(x) @ self.J
 
-    def interactions(self, x):
+    def interactions(self, x: torch.Tensor) -> torch.Tensor:
         """Compute interactions prescribed by the model's edges.
 
         Args:
@@ -177,14 +204,14 @@ class GraphRestrictedBoltzmannMachine(AbstractBoltzmannMachine):
         """
         return x[..., self.edge_idx_i] * x[..., self.edge_idx_j]
 
-    def average_spinteractions(self, x):
-        """Calculate the average spin and average interaction values (per edge) of `x`."""
+    def average_sufficient_statistics(
+        self, x: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         interactions = self.interactions(x)
         return x.mean(dim=0), interactions.mean(dim=0)
 
     @property
-    def _ising(self):
-        """Convert the model to Ising format"""
+    def _ising(self) -> tuple[dict, dict]:
         h = self.h.clip(*self.h_range).detach().cpu().tolist()
         edge_idx_i = self.edge_idx_i.detach().cpu().tolist()
         edge_idx_j = self.edge_idx_j.detach().cpu().tolist()

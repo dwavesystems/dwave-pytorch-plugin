@@ -28,9 +28,19 @@ if TYPE_CHECKING:
 spread = AggregatedSamples.spread
 
 
-# TODO: docstrings and typhinting
-def make_sampler_and_graph(qpu: DWaveSampler) -> tuple:
-    """TODO"""
+def make_sampler_and_graph(
+    qpu: DWaveSampler,
+) -> tuple[FixedEmbeddingComposite, nx.Graph, dict]:
+    """A helper function that maps a QPU's variables to contiguous nonnegative integers.
+
+    Args:
+        qpu (DWaveSampler): the QPU
+
+    Returns:
+        tuple[FixedEmbeddingComposite, nx.Graph, dict]: the sampler with linear
+        variables, its corresponding graph, and the inverse mapping from linear
+        variables back to QPU variables
+    """
     G = qpu.to_networkx_graph()
     mapping = {physical: logical for physical, logical in zip(G, range(len(G)))}
     inverse = {logical: physical for physical, logical in mapping.items()}
@@ -40,22 +50,20 @@ def make_sampler_and_graph(qpu: DWaveSampler) -> tuple:
     return sampler, G, inverse
 
 
-def sample_to_tensor(sample_set: SampleSet, device=None):
+def sample_to_tensor(sample_set: SampleSet, device: str = None) -> torch.Tensor:
     """Converts a ``dimod.SampleSet`` to a ``torch.Tensor``.
-    TODO
 
     Args:
-        sample_set (dimod.SampleSet): TODO
-        obs (torch.Tensor, optional): TODO. Defaults to None.
+        sample_set (dimod.SampleSet): a sample set
+        device (str): the target device of the returned tensor
 
     Returns:
-        _type_: TODO
+        torch.Tensor: the sample set as a Tensor
     """
-    # Need to sort first because this module assumes variables
-    # labelled by integers and ordered as such
+    # Need to sort first because this module assumes variables are labelled by integers
+    # and ordered as such
     indices = np.argsort(sample_set.variables)
     sample = sample_set.record.sample[:, indices]
 
-    # TODO: dtype as arg
-    z = torch.tensor(sample, dtype=torch.float, device=device)
+    z = torch.tensor(sample, dtype=torch.float32, device=device)
     return z

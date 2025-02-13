@@ -113,20 +113,22 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
             ],
         )
 
-    def test_average_spinteractions(self):
+    def test_average_sufficient_statistics(self):
         c_answer_0 = [1, 1, 1, 1]
         c_answer_1 = [1, 1, 1, 1]
         c_answer_2 = [-1, 1, -1, -1]
 
-        m0, c0 = self.bm.average_spinteractions(self.ones)
+        m0, c0 = self.bm.average_sufficient_statistics(self.ones)
         self.assertListEqual(m0.tolist(), [1, 1, 1, 1])
         self.assertListEqual(c0.tolist(), c_answer_0)
 
-        m1, c1 = self.bm.average_spinteractions(torch.vstack([self.ones, self.mones]))
+        m1, c1 = self.bm.average_sufficient_statistics(
+            torch.vstack([self.ones, self.mones])
+        )
         self.assertListEqual(m1.tolist(), [0] * 4)
         self.assertListEqual(c1.tolist(), c_answer_1)
 
-        m2, c2 = self.bm.average_spinteractions(self.pmones)
+        m2, c2 = self.bm.average_sufficient_statistics(self.pmones)
         self.assertEqual(m2.tolist(), [1, -1, 1, -1])
         self.assertEqual(c2.tolist(), c_answer_2)
 
@@ -135,8 +137,8 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         s2 = self.pmones
         kld = self.bm.objective(s1, s2)
         kld.backward()
-        m_1, c_1 = self.bm.average_spinteractions(s1)
-        m_2, c_2 = self.bm.average_spinteractions(s2)
+        m_1, c_1 = self.bm.average_sufficient_statistics(s1)
+        m_2, c_2 = self.bm.average_sufficient_statistics(s2)
         self.assertListEqual(self.bm.h.grad.tolist(), (m_1 - m_2).tolist())
         self.assertListEqual(self.bm.J.grad.tolist(), (c_1 - c_2).tolist())
 
