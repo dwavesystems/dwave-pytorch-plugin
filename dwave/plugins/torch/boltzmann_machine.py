@@ -59,7 +59,7 @@ class AbstractBoltzmannMachine(ABC, torch.nn.Module):
         self.register_forward_pre_hook(lambda *args: self.clip_parameters())
 
     @abstractmethod
-    def average_sufficient_statistics(
+    def sufficient_statistics(
         self, x: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculate the average spin and average interaction values (per edge) of `x`.
@@ -204,7 +204,7 @@ class GraphRestrictedBoltzmannMachine(AbstractBoltzmannMachine):
         """
         return x[..., self.edge_idx_i] * x[..., self.edge_idx_j]
 
-    def average_sufficient_statistics(
+    def sufficient_statistics(
         self, x: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
         interactions = self.interactions(x)
