@@ -208,11 +208,21 @@ class GraphRestrictedBoltzmannMachine(AbstractBoltzmannMachine):
     def sufficient_statistics(
         self, x: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Compute the sufficient statistics of a Boltzmann machine, i.e., average spin
+        and average interaction values (per edge) of `x`.
+
+        Args:
+            x (torch.Tensor): a tensor of shape (..., N)
+
+        Returns:
+            tuple[torch.Tensor, torch.Tensor]: the average spin and average spin-spin of `x`.
+        """
         interactions = self.interactions(x)
         return x.mean(dim=0), interactions.mean(dim=0)
 
     @property
     def _ising(self) -> tuple[dict, dict]:
+        """Convert the model to Ising format"""
         h = self.h.clip(*self.h_range).detach().cpu().tolist()
         edge_idx_i = self.edge_idx_i.detach().cpu().tolist()
         edge_idx_j = self.edge_idx_j.detach().cpu().tolist()
