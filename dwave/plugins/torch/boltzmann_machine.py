@@ -203,7 +203,7 @@ class GraphRestrictedBoltzmannMachine(AbstractBoltzmannMachine):
             x (torch.tensor): tensor of shape (..., number_of_variables)
 
         Returns:
-            torch.tensor: tensor of interaction terms of shape (..., number_of_edges)
+            torch.tensor: Tensor of interaction terms of shape (..., number_of_edges).
         """
         return x[..., self.edge_idx_i] * x[..., self.edge_idx_j]
 
