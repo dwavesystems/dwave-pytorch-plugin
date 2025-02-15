@@ -72,7 +72,7 @@ class AbstractBoltzmannMachine(ABC, torch.nn.Module):
             tuple[torch.Tensor, torch.Tensor]: The average spin and average spin-spin of ``x``.
         """
 
-    def clip_parameters(self):
+    def clip_parameters(self) -> None:
         """Clips linear and quadratic bias weights in-place."""
         self.get_parameter("h").data.clamp_(*self.h_range)
         self.get_parameter("J").data.clamp_(*self.j_range)
