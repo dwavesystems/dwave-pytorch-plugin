@@ -110,8 +110,8 @@ class AbstractBoltzmannMachine(ABC, torch.nn.Module):
         negative log likelihood.
 
         Args:
-            s_observed (torch.Tensor): tensor of observed (data) spins with shape (b1, N)
-            s_model (torch.Tensor): tensor of spins drawn from the model with shape (b2, N)
+            s_observed (torch.Tensor): Tensor of observed (data) spins with shape (b1, N).
+            s_model (torch.Tensor): Tensor of spins drawn from the model with shape (b2, N).
 
         Returns:
             torch.Tensor: Scalar difference of the average energies between the two samples.
