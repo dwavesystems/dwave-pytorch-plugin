@@ -54,11 +54,11 @@ def sample_to_tensor(sample_set: SampleSet, device: str = None) -> torch.Tensor:
     """Converts a ``dimod.SampleSet`` to a ``torch.Tensor``.
 
     Args:
-        sample_set (dimod.SampleSet): a sample set
-        device (str): the target device of the returned tensor
+        sample_set (dimod.SampleSet): A sample set.
+        device (str): The target device of the returned tensor.
 
     Returns:
-        torch.Tensor: the sample set as a Tensor
+        torch.Tensor: The sample set as a Tensor.
     """
     # Need to sort first because this module assumes variables are labelled by integers
     # and ordered as such
