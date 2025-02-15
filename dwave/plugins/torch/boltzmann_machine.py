@@ -86,7 +86,7 @@ class AbstractBoltzmannMachine(ABC, torch.nn.Module):
     @property
     @abstractmethod
     def _ising(self) -> tuple[dict, dict]:
-        """Convert the model to Ising format"""
+        """Convert the model to Ising format."""
 
     @staticmethod
     def pairwise_matrix(x: torch.Tensor) -> torch.Tensor:
