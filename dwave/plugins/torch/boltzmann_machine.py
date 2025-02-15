@@ -94,7 +94,7 @@ class AbstractBoltzmannMachine(ABC, torch.nn.Module):
         diagonal is the average spin.
 
         Args:
-            x (torch.Tensor): A tensor with shape (batch, N)
+            x (torch.Tensor): A tensor with shape (batch, N).
 
         Returns:
             torch.Tensor: the pairwise matrix with shape (batch, N, N)
