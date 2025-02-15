@@ -69,7 +69,7 @@ class AbstractBoltzmannMachine(ABC, torch.nn.Module):
             x (torch.Tensor): A tensor of shape (..., N).
 
         Returns:
-            tuple[torch.Tensor, torch.Tensor]: the average spin and average spin-spin of `x`.
+            tuple[torch.Tensor, torch.Tensor]: The average spin and average spin-spin of ``x``.
         """
 
     def clip_parameters(self):
