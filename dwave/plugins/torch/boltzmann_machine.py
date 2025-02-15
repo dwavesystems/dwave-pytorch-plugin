@@ -66,7 +66,7 @@ class AbstractBoltzmannMachine(ABC, torch.nn.Module):
         and average interaction values (per edge) of ``x``.
 
         Args:
-            x (torch.Tensor): a tensor of shape (..., N)
+            x (torch.Tensor): A tensor of shape (..., N).
 
         Returns:
             tuple[torch.Tensor, torch.Tensor]: the average spin and average spin-spin of `x`.
