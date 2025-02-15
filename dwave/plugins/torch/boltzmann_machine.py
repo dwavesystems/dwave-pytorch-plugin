@@ -97,7 +97,7 @@ class AbstractBoltzmannMachine(ABC, torch.nn.Module):
             x (torch.Tensor): A tensor with shape (batch, N).
 
         Returns:
-            torch.Tensor: the pairwise matrix with shape (batch, N, N)
+            torch.Tensor: The pairwise matrix with shape (batch, N, N).
         """
         mtx = torch.bmm(x.unsqueeze(2), x.unsqueeze(1)).mean(0)
         mtx = mtx - torch.diag(mtx.diagonal()) + torch.diag(x.mean(0))
