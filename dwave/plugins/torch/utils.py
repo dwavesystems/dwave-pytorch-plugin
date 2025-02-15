@@ -65,5 +65,4 @@ def sample_to_tensor(sample_set: SampleSet, device: str = None) -> torch.Tensor:
     indices = np.argsort(sample_set.variables)
     sample = sample_set.record.sample[:, indices]
 
-    z = torch.tensor(sample, dtype=torch.float32, device=device)
-    return z
+    return torch.tensor(sample, dtype=torch.float32, device=device)
