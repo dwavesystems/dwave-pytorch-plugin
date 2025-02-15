@@ -148,12 +148,11 @@ class GraphRestrictedBoltzmannMachine(AbstractBoltzmannMachine):
     """Creates a graph-restricted Boltzmann machine.
 
     Args:
-        num_nodes (int): number of variables in the model.
-        edge_idx_i (torch.Tensor): list of endpoints i of a list of edges.
-        edge_idx_j (torch.Tensor): list of endpoints j of a list of edges.
-        h_range (tuple[float, float], optional): range of linear weights. Defaults to None.
-        j_range (tuple[float, float], optional): range of quadratic weights. Defaults to None.
-
+        num_nodes (int): Number of variables in the model.
+        edge_idx_i (torch.Tensor): List of endpoints i of a list of edges.
+        edge_idx_j (torch.Tensor): List of endpoints j of a list of edges.
+        h_range (tuple[float, float], optional): Range of linear weights. Defaults to None.
+        j_range (tuple[float, float], optional): Range of quadratic weights. Defaults to None.
     """
 
     def __init__(
