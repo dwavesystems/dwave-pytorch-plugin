@@ -125,6 +125,7 @@ class AbstractBoltzmannMachine(ABC, torch.nn.Module):
         self, sampler: Sampler, device: str = None, **sample_params: dict
     ) -> torch.Tensor:
         """Sample from the Boltzmann machine.
+
         This method converts the sampled spins to tensors and ensures they are not
         aggregated.
 
