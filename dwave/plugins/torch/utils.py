@@ -37,9 +37,9 @@ def make_sampler_and_graph(
         qpu (DWaveSampler): the QPU
 
     Returns:
-        tuple[FixedEmbeddingComposite, nx.Graph, dict]: the sampler with linear
+        tuple[FixedEmbeddingComposite, nx.Graph, dict]: The sampler with linear
         variables, its corresponding graph, and the inverse mapping from linear
-        variables back to QPU variables
+        variables back to QPU variables.
     """
     G = qpu.to_networkx_graph()
     mapping = {physical: logical for physical, logical in zip(G, range(len(G)))}
