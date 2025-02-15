@@ -114,7 +114,7 @@ class AbstractBoltzmannMachine(ABC, torch.nn.Module):
             s_model (torch.Tensor): tensor of spins drawn from the model with shape (b2, N)
 
         Returns:
-            torch.Tensor: a scalar; difference of the average energies between the two samples
+            torch.Tensor: Scalar difference of the average energies between the two samples.
         """
         self.clip_parameters()
         return self(s_observed).mean() - self(s_model).mean()
