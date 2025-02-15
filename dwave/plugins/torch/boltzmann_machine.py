@@ -99,8 +99,10 @@ class AbstractBoltzmannMachine(ABC, torch.nn.Module):
         Returns:
             torch.Tensor: The pairwise matrix with shape (batch, N, N).
         """
+        # calculate average spin-spin interactions on off-diagonals
         mtx = torch.bmm(x.unsqueeze(2), x.unsqueeze(1)).mean(0)
-        mtx = mtx - torch.diag(mtx.diagonal()) + torch.diag(x.mean(0))
+        # replace diagonal with average spin values
+        mtx = mtx.fill_diagonal_(0) + torch.diag(x.mean(0))
         return mtx
 
     def objective(
