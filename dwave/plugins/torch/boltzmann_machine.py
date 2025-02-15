@@ -189,10 +189,10 @@ class GraphRestrictedBoltzmannMachine(AbstractBoltzmannMachine):
         """Evaluates the Hamiltonian.
 
         Args:
-            x (torch.tensor): a tensor of shape (B, N)
+            x (torch.tensor): A tensor of shape (B, N)`
 
         Returns:
-            torch.tensor: Hamiltonians of shape (B,)
+            torch.tensor: Hamiltonians of shape (B,).
         """
         return x @ self.h + self.interactions(x) @ self.J
 
@@ -200,7 +200,7 @@ class GraphRestrictedBoltzmannMachine(AbstractBoltzmannMachine):
         """Compute interactions prescribed by the model's edges.
 
         Args:
-            x (torch.tensor): tensor of shape (..., number_of_variables)
+            x (torch.tensor): Tensor of shape (..., number_of_variables).
 
         Returns:
             torch.tensor: Tensor of interaction terms of shape (..., number_of_edges).
@@ -211,13 +211,13 @@ class GraphRestrictedBoltzmannMachine(AbstractBoltzmannMachine):
         self, x: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute the sufficient statistics of a Boltzmann machine, i.e., average spin
-        and average interaction values (per edge) of `x`.
+        and average interaction values (per edge) of ``x``.
 
         Args:
-            x (torch.Tensor): a tensor of shape (..., N)
+            x (torch.Tensor): A tensor of shape (..., N).
 
         Returns:
-            tuple[torch.Tensor, torch.Tensor]: the average spin and average spin-spin of `x`.
+            tuple[torch.Tensor, torch.Tensor]: The average spin and average spin-spin of ``x``.
         """
         interactions = self.interactions(x)
         return x.mean(dim=0), interactions.mean(dim=0)
