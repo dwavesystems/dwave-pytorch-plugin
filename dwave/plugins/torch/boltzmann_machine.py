@@ -130,14 +130,16 @@ class AbstractBoltzmannMachine(ABC, torch.nn.Module):
         aggregated.
 
         Args:
-            sampler (Sampler): the sampler used to sample from the model
-            sampler_params (dict): parameters of the `sampler.sample` method.
+            sampler (Sampler): The sampler used to sample from the model.
+            sampler_params (dict): Parameters of the `sampler.sample` method.
+            device (torch.device, optional): The device of the constructed tensor.
+            If None and data is a tensor then the device of data is used.
+            If None and data is not a tensor then the result tensor is constructed on the current device.
 
         Returns:
             torch.Tensor: Spins sampled from the model
             (shape prescribed by ``sampler`` and ``sample_params``).
         """
-        self.clip_parameters()
         h, J = self.ising
         ss = spread(sampler.sample_ising(h, J, **sample_params))
         spins = sample_to_tensor(ss, device=device)
@@ -225,10 +227,12 @@ class GraphRestrictedBoltzmannMachine(AbstractBoltzmannMachine):
     @property
     def _ising(self) -> tuple[dict, dict]:
         """Convert the model to Ising format"""
-        h = self.h.clip(*self.h_range).detach().cpu().tolist()
+        linear_biases = self.h.detach().cpu().tolist()
         edge_idx_i = self.edge_idx_i.detach().cpu().tolist()
         edge_idx_j = self.edge_idx_j.detach().cpu().tolist()
-        J_list = self.J.clip(*self.j_range).detach().cpu().tolist()
-        J = {(a, b): w for a, b, w in zip(edge_idx_i, edge_idx_j, J_list)}
+        quadratic_bias_list = self.J.detach().cpu().tolist()
+        quadratic_biases = {
+            (a, b): w for a, b, w in zip(edge_idx_i, edge_idx_j, quadratic_bias_list)
+        }
 
-        return h, J
+        return linear_biases, quadratic_biases
