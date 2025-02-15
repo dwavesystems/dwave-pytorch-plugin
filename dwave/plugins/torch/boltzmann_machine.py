@@ -63,7 +63,7 @@ class AbstractBoltzmannMachine(ABC, torch.nn.Module):
         self, x: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute the sufficient statistics of a Boltzmann machine, i.e., average spin
-        and average interaction values (per edge) of `x`.
+        and average interaction values (per edge) of ``x``.
 
         Args:
             x (torch.Tensor): a tensor of shape (..., N)
