@@ -133,8 +133,8 @@ class AbstractBoltzmannMachine(ABC, torch.nn.Module):
             sampler_params (dict): parameters of the `sampler.sample` method.
 
         Returns:
-            torch.torch.Tensor: spins sampled from the model
-            (shape prescribed by `sampler` and `sample_params`)
+            torch.Tensor: Spins sampled from the model
+            (shape prescribed by ``sampler`` and ``sample_params``).
         """
         self.clip_parameters()
         h, J = self.ising
