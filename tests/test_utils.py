@@ -24,6 +24,7 @@ class TestUtils(unittest.TestCase):
 
     @unittest.expectedFailure
     def test_make_sampler_and_graph(self):
+        make_sampler_and_graph
         raise NotImplementedError("TODO")
 
     def test_sample_to_tensor(self):
@@ -31,3 +32,7 @@ class TestUtils(unittest.TestCase):
         spins = sample_to_tensor(ss)
         self.assertTupleEqual((3, 2), tuple(spins.shape))
         self.assertIsInstance(spins, Tensor)
+
+
+if __name__ == "__main__":
+    unittest.main()

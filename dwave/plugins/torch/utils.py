@@ -53,7 +53,9 @@ def make_sampler_and_graph(
     return sampler, G, inverse
 
 
-def sample_to_tensor(sample_set: SampleSet, device: str = None) -> torch.Tensor:
+def sample_to_tensor(
+    sample_set: SampleSet, device: torch.device = None
+) -> torch.Tensor:
     """Converts a ``dimod.SampleSet`` to a ``torch.Tensor``.
 
     Args:

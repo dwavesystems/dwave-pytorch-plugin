@@ -88,23 +88,6 @@ class AbstractBoltzmannMachine(ABC, torch.nn.Module):
     def _ising(self) -> tuple[dict, dict]:
         """Convert the model to Ising format."""
 
-    @staticmethod
-    def pairwise_matrix(x: torch.Tensor) -> torch.Tensor:
-        """Computes a matrix whose off-diagonals are average spin-spin interactions and
-        diagonal is the average spin.
-
-        Args:
-            x (torch.Tensor): A tensor with shape (batch, N).
-
-        Returns:
-            torch.Tensor: The pairwise matrix with shape (batch, N, N).
-        """
-        # calculate average spin-spin interactions on off-diagonals
-        mtx = torch.bmm(x.unsqueeze(2), x.unsqueeze(1)).mean(0)
-        # replace diagonal with average spin values
-        mtx = mtx.fill_diagonal_(0) + torch.diag(x.mean(0))
-        return mtx
-
     def objective(
         self, s_observed: torch.Tensor, s_model: torch.Tensor
     ) -> torch.Tensor:
@@ -122,7 +105,7 @@ class AbstractBoltzmannMachine(ABC, torch.nn.Module):
         return self(s_observed).mean() - self(s_model).mean()
 
     def sample(
-        self, sampler: Sampler, device: str = None, **sample_params: dict
+        self, sampler: Sampler, device: torch.device = None, **sample_params: dict
     ) -> torch.Tensor:
         """Sample from the Boltzmann machine.
 
@@ -159,30 +142,26 @@ class GraphRestrictedBoltzmannMachine(AbstractBoltzmannMachine):
 
     def __init__(
         self,
-        num_nodes,
-        edge_idx_i,
-        edge_idx_j,
+        num_nodes: int,
+        edge_idx_i: torch.Tensor,
+        edge_idx_j: torch.Tensor,
         *,
         h_range: tuple = None,
         j_range: tuple = None,
     ):
         super().__init__(h_range=h_range, j_range=j_range)
 
-        number_of_interactions = len(edge_idx_i)
+        num_edges = len(edge_idx_i)
         if edge_idx_i.size(0) != edge_idx_j.size(0):
             raise ValueError("Endpoints 'edge_idx_i' and 'edge_idx_j' are mismatched")
 
         if torch.unique(torch.cat([edge_idx_i, edge_idx_j])).size(0) > num_nodes:
             raise ValueError(
-                "Vertices are assumed to be contiguous nonnegative integers starting from 0 (inclusive). The input edge set implies otherwise."
+                "Vertices are required to be contiguous nonnegative integers starting from 0 (inclusive). The input edge set implies otherwise."
             )
 
-        self.nodes = num_nodes
-
         self.h = torch.nn.Parameter(0.01 * (2 * torch.randint(0, 2, (num_nodes,)) - 1))
-        self.J = torch.nn.Parameter(
-            1.0 * (2 * torch.randint(0, 2, (number_of_interactions,)) - 1)
-        )
+        self.J = torch.nn.Parameter(1.0 * (2 * torch.randint(0, 2, (num_edges,)) - 1))
 
         self.register_buffer("edge_idx_i", edge_idx_i)
         self.register_buffer("edge_idx_j", edge_idx_j)
@@ -202,10 +181,10 @@ class GraphRestrictedBoltzmannMachine(AbstractBoltzmannMachine):
         """Compute interactions prescribed by the model's edges.
 
         Args:
-            x (torch.tensor): Tensor of shape (..., number_of_variables).
+            x (torch.tensor): Tensor of shape (..., num_nodes).
 
         Returns:
-            torch.tensor: Tensor of interaction terms of shape (..., number_of_edges).
+            torch.tensor: Tensor of interaction terms of shape (..., num_edges).
         """
         return x[..., self.edge_idx_i] * x[..., self.edge_idx_j]
 

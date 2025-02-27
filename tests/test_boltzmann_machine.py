@@ -85,34 +85,6 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         self.assertEqual(-1, self.bm.objective(s1, s2).item())
         self.assertEqual(-1, self.bm.objective(s1, s3))
 
-    def test_pairwise(self):
-        pw0 = self.bm.pairwise_matrix(self.ones)
-        self.assertListEqual(pw0.tolist(), [[1] * 4] * 4)
-
-        pw1 = self.bm.pairwise_matrix(torch.vstack([self.ones, self.mones]))
-        self.assertListEqual(
-            pw1.tolist(),
-            [[0, 1, 1, 1], [1, 0, 1, 1], [1, 1, 0, 1], [1, 1, 1, 0]],
-        )
-
-        pw2 = self.bm.pairwise_matrix(self.pmones)
-        self.assertListEqual(
-            pw2.tolist(),
-            [[1, -1, 1, -1], [-1, -1, -1, 1], [1, -1, 1, -1], [-1, 1, -1, -1]],
-        )
-
-        # ones ones ones, pmones
-        pw3 = self.bm.pairwise_matrix(self.sample_1)
-        self.assertListEqual(
-            pw3.tolist(),
-            [
-                [1.0, 0.5, 1.0, 0.5],
-                [0.5, 0.5, 0.5, 1.0],
-                [1.0, 0.5, 1.0, 0.5],
-                [0.5, 1.0, 0.5, 0.5],
-            ],
-        )
-
     def test_sufficient_statistics(self):
         c_answer_0 = [1, 1, 1, 1]
         c_answer_1 = [1, 1, 1, 1]
@@ -122,9 +94,7 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         self.assertListEqual(m0.tolist(), [1, 1, 1, 1])
         self.assertListEqual(c0.tolist(), c_answer_0)
 
-        m1, c1 = self.bm.sufficient_statistics(
-            torch.vstack([self.ones, self.mones])
-        )
+        m1, c1 = self.bm.sufficient_statistics(torch.vstack([self.ones, self.mones]))
         self.assertListEqual(m1.tolist(), [0] * 4)
         self.assertListEqual(c1.tolist(), c_answer_1)
 

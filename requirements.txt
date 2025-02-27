@@ -3,6 +3,7 @@ numpy==2.0.2
 networkx==3.2.1
 dimod==0.12.18
 dwave-system==1.28.0
+dwave-hybrid==0.6.13
 
 # Development requirements
 reno==4.1.0
