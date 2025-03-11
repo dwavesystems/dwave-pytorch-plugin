@@ -112,9 +112,18 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         self.assertListEqual(self.bm.h.grad.tolist(), (m_1 - m_2).tolist())
         self.assertListEqual(self.bm.J.grad.tolist(), (c_1 - c_2).tolist())
 
-    @unittest.expectedFailure
     def test_interactions(self):
-        raise NotImplementedError("TODO")
+        self.assertListEqual(
+            self.bm.interactions(torch.tensor([[0.0, 3.0, 2.0, 1.0]])).tolist(),
+            [[0, 0, 0, 6]],
+        )
+        all_ones = [[1, 1, 1, 1]]
+        self.assertListEqual(self.bm.interactions(self.ones).tolist(), all_ones)
+        self.assertListEqual(self.bm.interactions(self.ones).tolist(), all_ones)
+        self.assertListEqual(self.bm.interactions(self.mones).tolist(), all_ones)
+        mpmm = [[-1, 1, -1, -1]]
+        self.assertListEqual(self.bm.interactions(self.pmones).tolist(), mpmm)
+        self.assertListEqual(self.bm.interactions(self.mpones).tolist(), mpmm)
 
     def test_ising(self):
         with self.subTest("Unbounded weight range"):

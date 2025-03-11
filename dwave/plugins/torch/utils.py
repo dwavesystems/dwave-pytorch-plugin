@@ -37,21 +37,19 @@ def make_sampler_and_graph(
     convenience and efficiency for applying tensor operations downstream.
 
     Args:
-        qpu (DWaveSampler): The DWaveSampler QPU for which an embedded composite sampler
-            with linear variables is created.
+        qpu (DWaveSampler): The ``dwave.system.DWaveSampler`` QPU for which an embedded
+            composite sampler with linear variables is created.
 
     Returns:
-        tuple[FixedEmbeddingComposite, nx.Graph, dict]: The sampler with linear
-        variables, its corresponding graph, and the inverse mapping from linear
-        variables back to QPU variables.
+        tuple[FixedEmbeddingComposite, nx.Graph]: The sampler with linear
+            variables and its corresponding graph.
     """
     G = qpu.to_networkx_graph()
     mapping = {physical: logical for physical, logical in zip(G, range(len(G)))}
-    inverse = {logical: physical for physical, logical in mapping.items()}
 
     G = nx.relabel_nodes(G, mapping)
     sampler = FixedEmbeddingComposite(qpu, {l_: [p] for p, l_ in mapping.items()})
-    return sampler, G, inverse
+    return sampler, G
 
 
 def sample_to_tensor(
@@ -63,7 +61,8 @@ def sample_to_tensor(
         sample_set (dimod.SampleSet): A sample set.
         device (torch.device, optional): The device of the constructed tensor.
             If ``None`` and data is a tensor then the device of data is used.
-            If ``None`` and data is not a tensor then the result tensor is constructed on the current device.
+            If ``None`` and data is not a tensor then the result tensor is constructed
+            on the current device.
 
     Returns:
         torch.Tensor: The sample set as a ``torch.Tensor``.

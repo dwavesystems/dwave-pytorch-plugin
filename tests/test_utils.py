@@ -14,18 +14,27 @@
 
 import unittest
 
+import networkx as nx
+
 from dimod import SPIN, SampleSet
 from torch import Tensor
 
 from dwave.plugins.torch.utils import make_sampler_and_graph, sample_to_tensor
+from dwave.system.testing import MockDWaveSampler
+from dwave.embedding import is_valid_embedding
 
 
 class TestUtils(unittest.TestCase):
 
-    @unittest.expectedFailure
     def test_make_sampler_and_graph(self):
-        make_sampler_and_graph
-        raise NotImplementedError("TODO")
+        qpu = MockDWaveSampler(topology_type="zephyr", topology_shape=(1, 4))
+        qpu.nodelist = [1, 2, 34, 35]
+        qpu.edgelist = [(1, 34), (2, 34), (34, 35)]
+        T = nx.from_edgelist(qpu.edgelist)
+        sampler, S = make_sampler_and_graph(qpu)
+        self.assertSetEqual(set(S.nodes), {0, 1, 2, 3})
+        self.assertTrue(nx.algorithms.is_isomorphic(S, T))
+        self.assertTrue(is_valid_embedding(sampler.embedding, S, T))
 
     def test_sample_to_tensor(self):
         ss = SampleSet.from_samples([[1, -1], [1, 1], [1, 1]], SPIN, [-1, 2, 2])

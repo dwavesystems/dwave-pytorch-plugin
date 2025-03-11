@@ -33,8 +33,10 @@ class AbstractBoltzmannMachine(ABC, torch.nn.Module):
     """Abstract class for Boltzmann machines.
 
     Args:
-        h_range (tuple[float, float], optional): Range of linear weights. If ``None``, uses an infinite range.
-        j_range (tuple[float, float], optional): Range of quadratic weights. If ``None``, uses an infinite range.
+        h_range (tuple[float, float], optional): Range of linear weights.
+            If ``None``, uses an infinite range.
+        j_range (tuple[float, float], optional): Range of quadratic weights.
+            If ``None``, uses an infinite range.
     """
 
     def __init__(
@@ -66,10 +68,11 @@ class AbstractBoltzmannMachine(ABC, torch.nn.Module):
         and average interaction values (per edge) of ``x``.
 
         Args:
-            x (torch.Tensor): A tensor of shape (..., N).
+            x (torch.Tensor): A tensor of shape (..., N) where N denotes the number of
+                variables in the model.
 
         Returns:
-            tuple[torch.Tensor, torch.Tensor]: The average spin and average spin-spin of ``x``.
+            tuple[torch.Tensor, torch.Tensor]: The sufficient statistics of ``x``.
         """
 
     def clip_parameters(self) -> None:
@@ -95,11 +98,15 @@ class AbstractBoltzmannMachine(ABC, torch.nn.Module):
         negative log likelihood.
 
         Args:
-            s_observed (torch.Tensor): Tensor of observed (data) spins with shape (b1, N).
-            s_model (torch.Tensor): Tensor of spins drawn from the model with shape (b2, N).
+            s_observed (torch.Tensor): Tensor of observed spins (data) with shape
+                (b1, N) where b1 denotes the batch size and N denotes the number of
+                variables in the model.
+            s_model (torch.Tensor): Tensor of spins drawn from the model with shape
+                (b2, N) where b2 denotes the batch size and N denotse the number of
+                variables in the model.
 
         Returns:
-            torch.Tensor: Scalar difference of the average energies between the two samples.
+            torch.Tensor: Scalar difference of the average energy of data and model.
         """
         self.clip_parameters()
         return self(s_observed).mean() - self(s_model).mean()
@@ -109,19 +116,21 @@ class AbstractBoltzmannMachine(ABC, torch.nn.Module):
     ) -> torch.Tensor:
         """Sample from the Boltzmann machine.
 
-        This method converts the sampled spins to tensors and ensures they are not
-        aggregated.
+        This method samples and converts a sample of spins to tensors and ensures they
+        are not aggregated---provided the aggregation information is retained in the
+        sample set.
 
         Args:
             sampler (Sampler): The sampler used to sample from the model.
             sampler_params (dict): Parameters of the `sampler.sample` method.
             device (torch.device, optional): The device of the constructed tensor.
-            If None and data is a tensor then the device of data is used.
-            If None and data is not a tensor then the result tensor is constructed on the current device.
+                If ``None`` and data is a tensor then the device of data is used.
+                If ``None`` and data is not a tensor then the result tensor is
+                constructed on the current device.
 
         Returns:
             torch.Tensor: Spins sampled from the model
-            (shape prescribed by ``sampler`` and ``sample_params``).
+                (shape prescribed by ``sampler`` and ``sample_params``).
         """
         h, J = self.ising
         ss = spread(sampler.sample_ising(h, J, **sample_params))
@@ -136,8 +145,10 @@ class GraphRestrictedBoltzmannMachine(AbstractBoltzmannMachine):
         num_nodes (int): Number of variables in the model.
         edge_idx_i (torch.Tensor): List of endpoints i of a list of edges.
         edge_idx_j (torch.Tensor): List of endpoints j of a list of edges.
-        h_range (tuple[float, float], optional): Range of linear weights. If ``None``, uses an infinite range.
-        j_range (tuple[float, float], optional): Range of quadratic weights. If ``None``, uses an infinite range.
+        h_range (tuple[float, float], optional): Range of linear weights.
+            If ``None``, uses an infinite range.
+        j_range (tuple[float, float], optional): Range of quadratic weights.
+            If ``None``, uses an infinite range.
     """
 
     def __init__(
@@ -170,7 +181,8 @@ class GraphRestrictedBoltzmannMachine(AbstractBoltzmannMachine):
         """Evaluates the Hamiltonian.
 
         Args:
-            x (torch.tensor): A tensor of shape (B, N)`
+            x (torch.tensor): A tensor of shape (B, N) where B denotes batch size and
+                N denotes the number of variables in the model.
 
         Returns:
             torch.tensor: Hamiltonians of shape (B,).
@@ -181,10 +193,12 @@ class GraphRestrictedBoltzmannMachine(AbstractBoltzmannMachine):
         """Compute interactions prescribed by the model's edges.
 
         Args:
-            x (torch.tensor): Tensor of shape (..., num_nodes).
+            x (torch.tensor): Tensor of shape (..., N) where N denotes the number of
+                variables in the model.
 
         Returns:
-            torch.tensor: Tensor of interaction terms of shape (..., num_edges).
+            torch.tensor: Tensor of interaction terms of shape (..., M) where M denotes
+                the number of edges in the model.
         """
         return x[..., self.edge_idx_i] * x[..., self.edge_idx_j]
 
@@ -195,10 +209,11 @@ class GraphRestrictedBoltzmannMachine(AbstractBoltzmannMachine):
         and average interaction values (per edge) of ``x``.
 
         Args:
-            x (torch.Tensor): A tensor of shape (..., N).
+            x (torch.Tensor): A tensor of shape (..., N) where N denotes the number of
+                variables in the model.
 
         Returns:
-            tuple[torch.Tensor, torch.Tensor]: The average spin and average spin-spin of ``x``.
+            tuple[torch.Tensor, torch.Tensor]: The sufficient statistics of ``x``.
         """
         interactions = self.interactions(x)
         return x.mean(dim=0), interactions.mean(dim=0)
