@@ -33,8 +33,8 @@ class AbstractBoltzmannMachine(ABC, torch.nn.Module):
     """Abstract class for Boltzmann machines.
 
     Args:
-        h_range (tuple[float, float], optional): range of linear weights. Defaults to None.
-        j_range (tuple[float, float], optional): range of quadratic weights. Defaults to None.
+        h_range (tuple[float, float], optional): Range of linear weights. If ``None``, uses an infinite range.
+        j_range (tuple[float, float], optional): Range of quadratic weights. If ``None``, uses an infinite range.
     """
 
     def __init__(
@@ -136,8 +136,8 @@ class GraphRestrictedBoltzmannMachine(AbstractBoltzmannMachine):
         num_nodes (int): Number of variables in the model.
         edge_idx_i (torch.Tensor): List of endpoints i of a list of edges.
         edge_idx_j (torch.Tensor): List of endpoints j of a list of edges.
-        h_range (tuple[float, float], optional): Range of linear weights. Defaults to None.
-        j_range (tuple[float, float], optional): Range of quadratic weights. Defaults to None.
+        h_range (tuple[float, float], optional): Range of linear weights. If ``None``, uses an infinite range.
+        j_range (tuple[float, float], optional): Range of quadratic weights. If ``None``, uses an infinite range.
     """
 
     def __init__(

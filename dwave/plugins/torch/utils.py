@@ -32,12 +32,13 @@ def make_sampler_and_graph(
     qpu: DWaveSampler,
 ) -> tuple[FixedEmbeddingComposite, nx.Graph, dict]:
     """A helper function that maps a QPU's variables to contiguous nonnegative integers.
+
     Mapping variables to contiguous nonnegative integers is a requirement motivated by
     convenience and efficiency for applying tensor operations downstream.
 
     Args:
         qpu (DWaveSampler): The DWaveSampler QPU for which an embedded composite sampler
-        with linear variables is created.
+            with linear variables is created.
 
     Returns:
         tuple[FixedEmbeddingComposite, nx.Graph, dict]: The sampler with linear
@@ -61,11 +62,11 @@ def sample_to_tensor(
     Args:
         sample_set (dimod.SampleSet): A sample set.
         device (torch.device, optional): The device of the constructed tensor.
-        If None and data is a tensor then the device of data is used.
-        If None and data is not a tensor then the result tensor is constructed on the current device.
+            If ``None`` and data is a tensor then the device of data is used.
+            If ``None`` and data is not a tensor then the result tensor is constructed on the current device.
 
     Returns:
-        torch.Tensor: The sample set as a torch.Tensor.
+        torch.Tensor: The sample set as a ``torch.Tensor``.
     """
     # Need to sort first because this module assumes variables are labelled by integers
     # and ordered as such

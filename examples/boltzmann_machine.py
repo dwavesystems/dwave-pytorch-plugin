@@ -54,6 +54,7 @@ if __name__ == "__main__":
         )
         h_range = j_range = None
         G = zephyr_graph(1)
+
     num_nodes = G.number_of_nodes()
 
     # Generate fake data to fit the Boltzmann machine to.
