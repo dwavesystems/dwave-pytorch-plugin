@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from os import makedirs
 from math import prod
 from functools import reduce
 from itertools import product
@@ -168,7 +169,7 @@ if __name__ == "__main__":
     USE_QPU = True
     NUM_READS = 500
     SAMPLE_SIZE = 17
-    upsize = Resize((45, 45), interpolation=InterpolationMode.NEAREST)
+    upsize = Resize((48, 48), interpolation=InterpolationMode.NEAREST)
     downsize = Resize((28, 28))
 
     mnist = MNIST(
@@ -183,29 +184,10 @@ if __name__ == "__main__":
     x = 1 - 2 * x
 
     neal = SimulatedAnnealingSampler()
-    qpu = DWaveSampler(solver="Advantage_system4.1")
+    qpu = DWaveSampler(solver="BAY20_Z12_ALPHA", profile="alpha")
     h_range, j_range = qpu.properties["h_range"], qpu.properties["j_range"]
 
     sampler, G, mapping = make_sampler_graph_mapping_filled(qpu)
-    # sampler, G, mapping = make_sampler_graph_corrupted_king(qpu)
-    # sampler, G = make_sampler_and_graph_visual(qpu, upsize.size)
-    # plt.figure(figsize=(16, 16))
-    # plt.clf()
-    # idx = 9
-    # x_draw = x[idx].tolist()
-    # save_image(downsize(x[idx].reshape(upsize.size).unsqueeze(0)), "x_draw.png")
-    # inverse = {qc[0]: logic for logic, qc in sampler.embedding.items()}
-    # Q = qpu.to_networkx_graph()
-    # linear_biases = {q: (1 - x_draw[inverse[q]]) / 2 if q in inverse else 0 for q in Q}
-    # dnx.draw_pegasus(
-    #     Q,
-    #     linear_biases=linear_biases,
-    #     vmin=-1,
-    #     vmax=1,
-    #     node_size=100,
-    #     cmap=plt.cm.binary,
-    # )
-    # plt.savefig("G_emb")
     sample_kwargs = dict(
         num_reads=NUM_READS,
         annealing_time=1000,
@@ -230,7 +212,11 @@ if __name__ == "__main__":
     opt_grbm = AdamW(grbm.parameters(), lr=0.01)
 
     with_neal = True
-    for iteration in range(1000):
+    OUTDIR = "output/rawmnist/"
+    makedirs(OUTDIR, exist_ok=True)
+    plt.figure(figsize=(16, 16))
+    ax = plt.gca()
+    for step in range(1000):
         s = grbm.sample(sampler, **sample_kwargs)
         if with_neal:
             s = torch.tensor(
@@ -248,6 +234,8 @@ if __name__ == "__main__":
         objective = grbm.objective(x[:, mapping], s)
         objective.backward()
         opt_grbm.step()
+        ax.scatter([step], [objective.item()], c="black")
+        plt.savefig(f"{OUTDIR}/trace-{with_neal}.png")
         s_ = torch.zeros(
             [
                 s.shape[0],
@@ -256,6 +244,7 @@ if __name__ == "__main__":
         ).flatten(1)
         s_[:, mapping] = s
         im = (1 + s_.unflatten(1, (1, *upsize.size))) / 2
-        save_image(make_grid(downsize(im), 10), f"xgen-{with_neal}.png")
-        print(iteration, objective.item())
+        save_image(make_grid(downsize(im), 10), f"{OUTDIR}/xgen-{with_neal}-latest.png")
+        save_image(make_grid(downsize(im), 10), f"{OUTDIR}/xgen-{with_neal}-{step}.png")
+        print(step, objective.item())
     print("Ex.ted")
