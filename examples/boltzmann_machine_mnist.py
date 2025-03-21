@@ -29,7 +29,7 @@ from dwave.samplers import SimulatedAnnealingSampler
 from torch import nn
 from torch.optim import SGD, AdamW
 from torchvision.datasets import MNIST
-from torchvision.transforms.v2 import ToTensor, Compose, Resize
+from torchvision.transforms.v2 import Compose, Resize, ToImage, ToDtype
 from torch.utils.data import DataLoader
 from torchvision.utils import make_grid, save_image
 from scipy.optimize import linear_sum_assignment
@@ -87,6 +87,49 @@ def make_sampler_and_graph_visual(qpu: DWaveSampler, shape: tuple[int, int]):
     return sampler, T
 
 
+def make_sampler_graph_mapping_filled(qpu):
+    T = qpu.to_networkx_graph()
+    l2q = {lin: (q,) for lin, q in enumerate(T)}
+    q2l = {qq[0]: lin for lin, qq in l2q.items()}
+    T = nx.relabel_nodes(T, q2l)
+    # Target graph is now linearly labelled
+
+    emb_king = make_origin_embeddings(qpu, "kings")[0]
+    emb_king = {g: tuple(map(q2l.get, c)) for g, c in emb_king.items()}
+    # emb_king now maps grid to linear coordinates of qubit
+
+    shape = [max(emb_king, key=lambda x: x[i])[i] + 1 for i in [0, 1]]
+    linq2g = dict()
+    for g, c in emb_king.items():
+        for q in c:
+            linq2g[q] = g
+    nodes = list(T)
+    np.random.shuffle(nodes)
+    for linq in T:
+        # If the linear qubit is already assigned, skip it
+        if linq in linq2g:
+            continue
+        # Otherwise, let's assign it a neighbouring pixel
+        neighbors = list(T.neighbors(linq))
+        np.random.shuffle(neighbors)
+        for nbr in neighbors:
+            # If it's neighbour has a pixel, assign the same pixel.
+            if nbr in linq2g:
+                linq2g[linq] = linq2g[nbr]
+                break
+    assert len(T) == len(linq2g), "every linear qubit should be assigned to a pixel"
+    used_pixels = set(list(linq2g.values()))
+    g2lim = dict()
+    lim = 0
+    for g in product(range(shape[0]), range(shape[1])):
+        if g in used_pixels:
+            g2lim[g] = lim
+            lim += 1
+    mapping = torch.tensor([g2lim[linq2g[t]] for t in T])
+    sampler = FixedEmbeddingComposite(qpu, l2q)
+    return sampler, T, mapping
+
+
 def make_sampler_graph_corrupted_king(qpu):
     T = qpu.to_networkx_graph()
     emb_king = make_origin_embeddings(qpu, "kings")[0]
@@ -130,7 +173,7 @@ if __name__ == "__main__":
 
     mnist = MNIST(
         "/tmp/",
-        transform=Compose([ToTensor(), upsize]),
+        transform=Compose([ToImage(), ToDtype(torch.float32, scale=True), upsize]),
         download=True,
     )
     train_loader = DataLoader(mnist, 50_000)
@@ -143,7 +186,8 @@ if __name__ == "__main__":
     qpu = DWaveSampler(solver="Advantage_system4.1")
     h_range, j_range = qpu.properties["h_range"], qpu.properties["j_range"]
 
-    sampler, G, present = make_sampler_graph_corrupted_king(qpu)
+    sampler, G, mapping = make_sampler_graph_mapping_filled(qpu)
+    # sampler, G, mapping = make_sampler_graph_corrupted_king(qpu)
     # sampler, G = make_sampler_and_graph_visual(qpu, upsize.size)
     # plt.figure(figsize=(16, 16))
     # plt.clf()
@@ -167,7 +211,6 @@ if __name__ == "__main__":
         annealing_time=1000,
         answer_mode="raw",
         auto_scale=False,
-        chain_strength=2,
     )
     if not USE_QPU:
         sampler = neal
@@ -180,27 +223,29 @@ if __name__ == "__main__":
 
     # Instantiate the model
     grbm = GraphRestrictedBoltzmannMachine(
-        len(present), *torch.tensor(list(G.edges)).mT, h_range=h_range, j_range=j_range
+        len(mapping), *torch.tensor(list(G.edges)).mT, h_range=h_range, j_range=j_range
     )
 
     # Instantiate the optimizer
     opt_grbm = AdamW(grbm.parameters(), lr=0.01)
 
+    with_neal = True
     for iteration in range(1000):
         s = grbm.sample(sampler, **sample_kwargs)
-        s = torch.tensor(
-            neal.sample_ising(
-                *grbm.ising,
-                num_sweeps=1,
-                initial_states=s.int().tolist(),
-                beta_range=[1.0, 1.0],
-                proposal_acceptance_criteria="Gibbs",
-                randomize_order=True,
-            ).record.sample,
-            dtype=torch.float32,
-        )
+        if with_neal:
+            s = torch.tensor(
+                neal.sample_ising(
+                    *grbm.ising,
+                    num_sweeps=1,
+                    initial_states=s.int().tolist(),
+                    beta_range=[1.0, 1.0],
+                    proposal_acceptance_criteria="Gibbs",
+                    randomize_order=True,
+                ).record.sample,
+                dtype=torch.float32,
+            )
         opt_grbm.zero_grad()
-        objective = grbm.objective(x[:, present], s)
+        objective = grbm.objective(x[:, mapping], s)
         objective.backward()
         opt_grbm.step()
         s_ = torch.zeros(
@@ -209,8 +254,8 @@ if __name__ == "__main__":
             ]
             + upsize.size
         ).flatten(1)
-        s_[:, present] = s
+        s_[:, mapping] = s
         im = (1 + s_.unflatten(1, (1, *upsize.size))) / 2
-        save_image(make_grid(downsize(im), 10), "xgen.png")
+        save_image(make_grid(downsize(im), 10), f"xgen-{with_neal}.png")
         print(iteration, objective.item())
     print("Ex.ted")
