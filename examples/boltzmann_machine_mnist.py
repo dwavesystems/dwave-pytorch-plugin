@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from os import makedirs
-from math import prod
+from math import prod, floor
 from functools import reduce
 from itertools import product
 import torch
@@ -128,23 +128,95 @@ def make_sampler_graph_mapping_filled(qpu):
             lim += 1
     mapping = torch.tensor([g2lim[linq2g[t]] for t in T])
     sampler = FixedEmbeddingComposite(qpu, l2q)
+    print(mapping.unique(return_counts=True)[1])
     return sampler, T, mapping
+
+
+def max_density_contraction(Z: nx.Graph):
+    T = Z.copy()
+    plt.figure(figsize=(32, 32))
+    plt.clf()
+    dnx.draw_zephyr(T, node_size=20, node_color="red", edge_color="gray")
+    plt.savefig("Z12.png")
+    emb_king = make_origin_embeddings(qpu, "kings")[0]
+    emb_king = {k: emb_king[k] for k in sorted(emb_king)}
+
+    shape = [max(emb_king, key=lambda x: x[i])[i] + 1 for i in [0, 1]]
+    emb_corrupt = emb_king.copy()
+    for (r, c), chain in emb_king.items():
+        nx.contracted_edge(T, chain, False, False)
+        emb_corrupt[(r, c)] = chain
+    plt.clf()
+    dnx.draw_zephyr(T, node_size=20, node_color="red", edge_color="gray")
+    plt.savefig("Z12Contracted-kingwise.png")
+    # NOTE: merge by i, j+4 by increments of 8
+    print(nx.density(T), T.number_of_nodes())
+    assert shape[0] == shape[1], "assumed to be square"
+
+    # Identify column-wise
+    for i in range(shape[0]):
+        for j in range(0, shape[1], 8):
+            for offset in range(4):
+                j_off = offset + j
+                if floor((j % 4) / 2):
+                    continue
+                chain_a = emb_corrupt.get((i, j_off))
+                chain_b = emb_corrupt.pop((i, j_off + 4), None)
+                if chain_a is None or chain_b is None:
+                    continue
+                for edge in product(chain_a, chain_b):
+                    if T.has_edge(*edge):
+                        nx.contracted_edge(T, edge, False, False)
+                        emb_corrupt[i, j_off] = chain_a + chain_b
+                        break
+    print(nx.density(T), T.number_of_nodes())
+    plt.clf()
+    dnx.draw_zephyr(T, node_size=20, node_color="red", edge_color="gray")
+    plt.savefig("Z12Contracted-columnwise.png")
+    # Identify row-wise
+    for j in range(shape[1]):
+        for i in range(0, shape[1], 8):
+            for offset in range(4):
+                i_off = offset + i
+                if floor((i % 4) / 2):
+                    continue
+                chain_a = emb_corrupt.get((i_off, j))
+                chain_b = emb_corrupt.pop((i_off + 4, j), None)
+                if chain_a is None or chain_b is None:
+                    continue
+                for edge in product(chain_a, chain_b):
+                    if T.has_edge(*edge):
+                        nx.contracted_edge(T, edge, False, False)
+                        emb_corrupt[i_off, j] = chain_a + chain_b
+                        break
+    print(nx.density(T), T.number_of_nodes())
+    plt.clf()
+    dnx.draw_zephyr(T, node_size=20, node_color="red", edge_color="gray")
+    plt.savefig("Z12Contracted-full.png")
+    return T, emb_corrupt
+
+
+def relabel_corrupt(emb_corrupt):
+    coords = list(emb_corrupt.keys())
+    rows = sorted(set(map(lambda x: x[0], coords)))
+    cols = sorted(set(map(lambda x: x[1], coords)))
+    assert np.equal(rows, cols).all()
+    relabeller = {v: i for i, v in enumerate(rows)}
+    return {(relabeller[a], relabeller[b]): v for (a, b), v in emb_corrupt.items()}
 
 
 def make_sampler_graph_corrupted_king(qpu):
     T = qpu.to_networkx_graph()
-    emb_king = make_origin_embeddings(qpu, "kings")[0]
-    emb_king = {k: emb_king[k] for k in sorted(emb_king)}
-    for chain in emb_king.values():
-        nx.contracted_edge(T, chain, False, False)
-    shape = [max(emb_king, key=lambda x: x[i])[i] + 1 for i in [0, 1]]
-    plt.figure(figsize=(16, 16))
-    plt.clf()
-    dnx.draw_pegasus_embedding(qpu.to_networkx_graph(), emb=emb_king)
-    plt.savefig("P16King.png")
+    T, emb_corrupt = max_density_contraction(T)
+    emb_corrupt = relabel_corrupt(emb_corrupt)
+    shape = [max(emb_corrupt, key=lambda x: x[i])[i] + 1 for i in [0, 1]]
 
-    occupied_qubits = reduce(set.union, emb_king.values(), set())
+    occupied_qubits = reduce(set.union, emb_corrupt.values(), set())
     T.remove_nodes_from(set(T) - occupied_qubits)
+    plt.figure(figsize=(32, 32))
+    plt.clf()
+    dnx.draw_zephyr(T, node_size=20, node_color="red", edge_color="gray")
+    plt.savefig("Z12Final")
 
     present = list()
     lim2qpu = dict()
@@ -152,8 +224,8 @@ def make_sampler_graph_corrupted_king(qpu):
     n_missing = 0
     lin = 0
     for g in product(range(shape[0]), range(shape[1])):
-        if g in emb_king:
-            chain = emb_king[g]
+        if g in emb_corrupt:
+            chain = emb_corrupt[g]
             lim2qpu[lin] = chain
             present.append(lin)
             t2lim[chain[0]] = lin
@@ -169,12 +241,11 @@ if __name__ == "__main__":
     USE_QPU = True
     NUM_READS = 500
     SAMPLE_SIZE = 17
-    upsize = Resize((48, 48), interpolation=InterpolationMode.NEAREST)
-    downsize = Resize((28, 28))
+    downsize = Resize((24, 24), interpolation=InterpolationMode.NEAREST)
 
     mnist = MNIST(
         "/tmp/",
-        transform=Compose([ToImage(), ToDtype(torch.float32, scale=True), upsize]),
+        transform=Compose([ToImage(), ToDtype(torch.float32, scale=True), downsize]),
         download=True,
     )
     train_loader = DataLoader(mnist, 50_000)
@@ -186,13 +257,21 @@ if __name__ == "__main__":
     neal = SimulatedAnnealingSampler()
     qpu = DWaveSampler(solver="BAY20_Z12_ALPHA", profile="alpha")
     h_range, j_range = qpu.properties["h_range"], qpu.properties["j_range"]
+    # DELETE
+    # plt.figure(figsize=(16, 16))
+    # plt.clf()
+    # emb = make_origin_embeddings(qpu, "kings", (2, 2), reject_small_problems=False)[0]
+    # dnx.draw_zephyr_embedding(qpu.to_networkx_graph(), emb, node_size=30)
+    # plt.savefig("4x4KingsOnZephyr")
+    # DELETE
 
-    sampler, G, mapping = make_sampler_graph_mapping_filled(qpu)
+    sampler, G, mapping = make_sampler_graph_corrupted_king(qpu)
     sample_kwargs = dict(
         num_reads=NUM_READS,
         annealing_time=1000,
         answer_mode="raw",
         auto_scale=False,
+        chain_strength=2,
     )
     if not USE_QPU:
         sampler = neal
@@ -211,7 +290,7 @@ if __name__ == "__main__":
     # Instantiate the optimizer
     opt_grbm = AdamW(grbm.parameters(), lr=0.01)
 
-    with_neal = True
+    with_neal = False
     OUTDIR = "output/rawmnist/"
     makedirs(OUTDIR, exist_ok=True)
     plt.figure(figsize=(16, 16))
@@ -240,10 +319,10 @@ if __name__ == "__main__":
             [
                 s.shape[0],
             ]
-            + upsize.size
+            + downsize.size
         ).flatten(1)
         s_[:, mapping] = s
-        im = (1 + s_.unflatten(1, (1, *upsize.size))) / 2
+        im = (1 + s_.unflatten(1, (1, *downsize.size))) / 2
         save_image(make_grid(downsize(im), 10), f"{OUTDIR}/xgen-{with_neal}-latest.png")
         save_image(make_grid(downsize(im), 10), f"{OUTDIR}/xgen-{with_neal}-{step}.png")
         print(step, objective.item())
