@@ -249,81 +249,93 @@ if __name__ == "__main__":
         download=True,
     )
     train_loader = DataLoader(mnist, 50_000)
-    x, y = next(iter(train_loader))
-    x = x.flatten(1)
-    x = (x > 0.5).float()
-    x = 1 - 2 * x
+    for digit in range(10):
+        x, y = next(iter(train_loader))
+        x = x[y == digit]
+        x = x.flatten(1)
+        x = (x > 0.5).float()
+        x = 1 - 2 * x
 
-    neal = SimulatedAnnealingSampler()
-    qpu = DWaveSampler(solver="BAY20_Z12_ALPHA", profile="alpha")
-    h_range, j_range = qpu.properties["h_range"], qpu.properties["j_range"]
-    # DELETE
-    # plt.figure(figsize=(16, 16))
-    # plt.clf()
-    # emb = make_origin_embeddings(qpu, "kings", (2, 2), reject_small_problems=False)[0]
-    # dnx.draw_zephyr_embedding(qpu.to_networkx_graph(), emb, node_size=30)
-    # plt.savefig("4x4KingsOnZephyr")
-    # DELETE
+        neal = SimulatedAnnealingSampler()
+        qpu = DWaveSampler(solver="BAY20_Z12_ALPHA", profile="alpha")
+        h_range, j_range = qpu.properties["h_range"], qpu.properties["j_range"]
+        # DELETE
+        # plt.figure(figsize=(16, 16))
+        # plt.clf()
+        # emb = make_origin_embeddings(qpu, "kings", (2, 2), reject_small_problems=False)[0]
+        # dnx.draw_zephyr_embedding(qpu.to_networkx_graph(), emb, node_size=30)
+        # plt.savefig("4x4KingsOnZephyr")
+        # DELETE
 
-    sampler, G, mapping = make_sampler_graph_corrupted_king(qpu)
-    sample_kwargs = dict(
-        num_reads=NUM_READS,
-        annealing_time=1000,
-        answer_mode="raw",
-        auto_scale=False,
-        chain_strength=2,
-    )
-    if not USE_QPU:
-        sampler = neal
-        sample_kwargs.pop("answer_mode")
-        sample_kwargs.pop("auto_scale")
-        sample_kwargs.pop("annealing_time")
-        sample_kwargs["beta_range"] = [1, 1]
-        sample_kwargs["num_sweeps"] = 500
-        h_range = j_range = None
+        sampler, G, mapping = make_sampler_graph_corrupted_king(qpu)
+        sample_kwargs = dict(
+            num_reads=NUM_READS,
+            annealing_time=1000,
+            answer_mode="raw",
+            auto_scale=False,
+            chain_strength=2,
+        )
+        if not USE_QPU:
+            sampler = neal
+            sample_kwargs.pop("answer_mode")
+            sample_kwargs.pop("auto_scale")
+            sample_kwargs.pop("annealing_time")
+            sample_kwargs["beta_range"] = [1, 1]
+            sample_kwargs["num_sweeps"] = 500
+            h_range = j_range = None
 
-    # Instantiate the model
-    grbm = GraphRestrictedBoltzmannMachine(
-        len(mapping), *torch.tensor(list(G.edges)).mT, h_range=h_range, j_range=j_range
-    )
+        # Instantiate the model
+        grbm = GraphRestrictedBoltzmannMachine(
+            len(mapping),
+            *torch.tensor(list(G.edges)).mT,
+            h_range=h_range,
+            j_range=j_range,
+        )
 
-    # Instantiate the optimizer
-    opt_grbm = AdamW(grbm.parameters(), lr=0.01)
+        # Instantiate the optimizer
+        opt_grbm = AdamW(grbm.parameters(), lr=0.01)
 
-    with_neal = False
-    OUTDIR = "output/rawmnist/"
-    makedirs(OUTDIR, exist_ok=True)
-    plt.figure(figsize=(16, 16))
-    ax = plt.gca()
-    for step in range(1000):
-        s = grbm.sample(sampler, **sample_kwargs)
-        if with_neal:
-            s = torch.tensor(
-                neal.sample_ising(
-                    *grbm.ising,
-                    num_sweeps=1,
-                    initial_states=s.int().tolist(),
-                    beta_range=[1.0, 1.0],
-                    proposal_acceptance_criteria="Gibbs",
-                    randomize_order=True,
-                ).record.sample,
-                dtype=torch.float32,
+        with_neal = False
+        OUTDIR = "output/rawmnist/"
+        makedirs(OUTDIR, exist_ok=True)
+        plt.figure(figsize=(16, 16))
+        ax = plt.gca()
+        for step in range(300):
+            s = grbm.sample(sampler, **sample_kwargs)
+            if with_neal:
+                s = torch.tensor(
+                    neal.sample_ising(
+                        *grbm.ising,
+                        num_sweeps=1,
+                        initial_states=s.int().tolist(),
+                        beta_range=[1.0, 1.0],
+                        proposal_acceptance_criteria="Gibbs",
+                        randomize_order=True,
+                    ).record.sample,
+                    dtype=torch.float32,
+                )
+            opt_grbm.zero_grad()
+            objective = grbm.objective(x[:, mapping], s)
+            objective.backward()
+            opt_grbm.step()
+            ax.scatter([step], [objective.item()], c="black")
+            plt.savefig(f"{OUTDIR}/trace-{digit}-{with_neal}.png")
+            s_ = torch.zeros(
+                [
+                    s.shape[0],
+                ]
+                + downsize.size
+            ).flatten(1)
+            s_[:, mapping] = s
+            im = (1 + s_.unflatten(1, (1, *downsize.size))) / 2
+            save_image(
+                make_grid(downsize(im), 10),
+                f"{OUTDIR}/xgen-{digit}-{with_neal}-latest.png",
             )
-        opt_grbm.zero_grad()
-        objective = grbm.objective(x[:, mapping], s)
-        objective.backward()
-        opt_grbm.step()
-        ax.scatter([step], [objective.item()], c="black")
-        plt.savefig(f"{OUTDIR}/trace-{with_neal}.png")
-        s_ = torch.zeros(
-            [
-                s.shape[0],
-            ]
-            + downsize.size
-        ).flatten(1)
-        s_[:, mapping] = s
-        im = (1 + s_.unflatten(1, (1, *downsize.size))) / 2
-        save_image(make_grid(downsize(im), 10), f"{OUTDIR}/xgen-{with_neal}-latest.png")
-        save_image(make_grid(downsize(im), 10), f"{OUTDIR}/xgen-{with_neal}-{step}.png")
-        print(step, objective.item())
+            if step % 10 == 0:
+                save_image(
+                    make_grid(downsize(im), 10),
+                    f"{OUTDIR}/xgen-{digit}-{with_neal}-{step}.png",
+                )
+            print(step, objective.item())
     print("Ex.ted")
