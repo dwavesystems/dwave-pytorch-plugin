@@ -1,0 +1,144 @@
+version: 2.1
+
+orbs:
+  ocean: dwave/ocean@1
+  windows: circleci/windows@5.0
+
+environment:
+  PIP_PROGRESS_BAR: 'off'
+
+jobs:
+  test-linux:
+    parameters:
+      python-version:
+        type: string
+
+    docker:
+      - image: python:<< parameters.python-version >>
+
+    steps:
+      - checkout
+
+      - ocean/pip-install:
+          requirements: tests/requirements.txt
+          cache: true
+
+      - ocean/pip-install:
+          requirements: requirements.txt
+          packages: .
+          cache: false
+
+      - ocean/coverage-run-unittest
+
+  test-macos:
+    parameters:
+      python-version:
+        type: string
+
+    executor:
+      name: ocean/macos
+      xcode: "16.2.0"
+
+    steps:
+      - checkout
+
+      - ocean/brew-install-pyenv:
+          update-homebrew: true
+
+      - ocean/pyenv-install-python:
+          python-version: << parameters.python-version >>
+          cache: true
+
+      - ocean/pip-install:
+          requirements: tests/requirements.txt
+          cache: true
+
+      - ocean/pip-install:
+          requirements: requirements.txt
+          packages: .
+          cache: false
+
+      - ocean/coverage-run-unittest:
+          upload-coverage: true
+
+  test-windows:
+    parameters:
+      python-version:
+        type: string
+
+    executor:
+      name: windows/default
+
+    steps:
+      - checkout
+
+      - ocean/nuget-install-python:
+          python-version: << parameters.python-version >>
+          cache: true
+
+      - ocean/pip-install:
+          requirements: tests/requirements.txt
+          cache: false
+
+      - ocean/pip-install:
+          requirements: requirements.txt
+          packages: .
+          cache: false
+
+      - ocean/coverage-run-unittest
+
+  deploy:
+    docker:
+      - image: python:3.12
+
+    steps:
+      - checkout
+
+      - run:
+          name: create virtualenv
+          command: |
+            python -m venv env
+
+      - run:
+          name: build sdist and bdist
+          command: |
+            . env/bin/activate
+            pip install -U pip setuptools wheel
+            python setup.py sdist
+            python setup.py bdist_wheel
+
+      - run:
+          name: upload
+          command: |
+            . env/bin/activate
+            pip install twine
+            twine check dist/*
+            twine upload -u "$PYPI_USERNAME" -p "$PYPI_PASSWORD" --skip-existing ./dist/*
+
+workflows:
+  version: 2
+
+  test:
+    jobs:
+      - test-linux:
+          matrix:
+            parameters:
+              python-version: &python-versions ["3.9.21", "3.10.16", "3.11.11", "3.12.8", "3.13.1"]
+      - test-macos:
+          matrix:
+            parameters:
+              python-version: *python-versions
+      - test-windows:
+          matrix:
+            parameters:
+              # note: limit to versions available via nuget
+              python-version: &python-versions-windows ["3.9.13", "3.10.11", "3.11.9", "3.12.8", "3.13.1"]
+
+  deploy:
+    jobs:
+      - deploy:
+          filters: &on-tag-push
+            tags:
+              only: /^[0-9]+(\.[0-9]+)*((\.dev|rc)([0-9]+)?)?$/
+            branches:
+              ignore: /.*/

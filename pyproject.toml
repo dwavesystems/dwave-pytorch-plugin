@@ -3,7 +3,7 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "dwave-torch-plugin"
+name = "dwave-pytorch-plugin"
 dynamic = ["version"]
 authors = [
     {name = "D-Wave Inc.", email = "tools@dwavesys.com"},
@@ -38,8 +38,8 @@ file = "README.rst"
 content-type = "text/x-rst"
 
 [project.urls]
-Homepage = "https://github.com/dwavesystems/dwave-torch-plugin"
-Download = "https://github.com/dwavesystems/dwave-torch-plugin/releases"
+Homepage = "https://github.com/dwavesystems/dwave-pytorch-plugin"
+Download = "https://github.com/dwavesystems/dwave-pytorch-plugin/releases"
 
 [tool.setuptools.packages]
 find = {}  # Scanning implicit namespaces is active by default
