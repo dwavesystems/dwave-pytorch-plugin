@@ -20,6 +20,7 @@ import numpy as np
 import torch
 from dimod import SampleSet
 from hybrid.composers import AggregatedSamples
+
 from dwave.system import FixedEmbeddingComposite
 
 if TYPE_CHECKING:
@@ -30,7 +31,7 @@ spread = AggregatedSamples.spread
 
 def make_sampler_and_graph(
     qpu: DWaveSampler,
-) -> tuple[FixedEmbeddingComposite, nx.Graph, dict]:
+) -> tuple[FixedEmbeddingComposite, nx.Graph]:
     """A helper function that maps a QPU's variables to contiguous nonnegative integers.
 
     Mapping variables to contiguous nonnegative integers is a requirement motivated by
@@ -53,7 +54,7 @@ def make_sampler_and_graph(
 
 
 def sample_to_tensor(
-    sample_set: SampleSet, device: torch.device = None
+    sample_set: SampleSet, device: torch.device | None = None
 ) -> torch.Tensor:
     """Converts a ``dimod.SampleSet`` to a ``torch.Tensor``.
 
