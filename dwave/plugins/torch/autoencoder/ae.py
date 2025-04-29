@@ -93,6 +93,6 @@ class AutoEncoder(torch.nn.Module):
         self, x: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         latents = self.encoder(x)
-        spins = self.latent_to_discrete(latents)
-        reconstructed_x = self.decoder(spins)
-        return reconstructed_x, spins, latents
+        discrete = self.latent_to_discrete(latents)
+        reconstructed_x = self.decoder(discrete)
+        return reconstructed_x, discrete, latents
