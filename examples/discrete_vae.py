@@ -287,8 +287,14 @@ def train_discrete_vae_from_scratch(n_latents: int = 256):
 
         # Now we generate new samples
         samples = grbm.sample(sampler, device=device, **sampler_kwargs)
-        images = autoencoder.decoder(samples.detach().unsqueeze(1)).clip(0.0, 1.0).cpu()
-        generation_tensor_for_plot = make_grid(images.squeeze(), nrow=images_per_row)
+        images = (
+            autoencoder.decoder(samples.unsqueeze(1))
+            .squeeze(1)
+            .clip(0.0, 1.0)
+            .detach()
+            .cpu()
+        )
+        generation_tensor_for_plot = make_grid(images, nrow=images_per_row)
         plt.imshow(generation_tensor_for_plot.permute(1, 2, 0))
         plt.axis("off")
         plt.title("Generated samples")
