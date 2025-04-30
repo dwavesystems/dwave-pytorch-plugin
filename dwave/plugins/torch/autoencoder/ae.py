@@ -43,17 +43,26 @@ class AutoEncoder(torch.nn.Module):
 
     Args:
         encoder (torch.nn.Module): The encoder must output latents that are later on
-            passed to `latent_to_discrete`. An encoder has signature (x) -> l.
+            passed to `latent_to_discrete`. An encoder has signature (x) -> l. x has
+            shape (batch_size, f1, f2, ...) and l has shape (batch_size, l1, l2, ...).
         decoder (torch.nn.Module): Decodes discrete tensors into data tensors. A decoder
-            has signature (d) -> x', where x' might be the reconstructed data with the
-            same shape as x, or might be another representation of the data (e.g. in a
-            text-to-image model, x is a sequence of tokens, and x' is an image).
-        latent_to_discrete (Callable[[torch.Tensor], torch.Tensor] | None): Maps the
-            latent representation of data (obtained with the encoder) to a tensor of
-            discretes that is then consumed by the decoder. A latent_to_discrete has
-            signature (l) -> d. If None, a model that uses the gumbel trick is used.
-            This assumes that the encoder output is of shape (batch_size, n_discrete)
-            and that the decoder input is of the same shape. Defaults to None.
+            has signature (d) -> x'. d has shape (batch_size, n, d1, d2, ...) and x' has
+            shape (batch_size, f'1, f'2, ...); if x' is the reconstructed data then
+            fi=f'i, but x' might be another representation of the data (e.g. in a
+            text-to-image model, x is a sequence of tokens, and x' is an image). Note
+            that the decoder input is of shape (batch_size, n, d1, d2, ...), where n is
+            a number of discrete representations to be created from a single latent
+            representation of a single initial data point.
+        latent_to_discrete (Callable[[torch.Tensor, int], torch.Tensor] | None): A
+            stochastic function that maps the output of the encoder to a discrete
+            representation. Importantly, since the function is stochastic, it allows for
+            the creation of multiple discrete representations from the latent
+            representation of a single data point. Thus, the signature of this function
+            is (l, n) -> d, where l is the output of the encoder and has shape
+            (batch_size, l1, l2, ...), n is the number of discrete representations per
+            data point, and d has shape (batch_size, n, d1, d2, ...), which will be the
+            input to the decoder. If None, the gumbel softmax function is used for
+            stochasticity. Defaults to None.
     """
 
     def __init__(
