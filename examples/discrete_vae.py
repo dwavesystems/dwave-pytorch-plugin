@@ -2,6 +2,7 @@ import time
 from typing import Literal
 
 import matplotlib.pyplot as plt
+import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from torchvision.datasets import MNIST
@@ -10,12 +11,13 @@ from torchvision.utils import make_grid
 
 from dwave.plugins.torch.autoencoder import AutoEncoder
 from dwave.plugins.torch.autoencoder.losses import pseudo_kl_divergence_loss
-from dwave.plugins.torch.autoencoder.losses.mmd import RadialBasisFunction, mmd_loss
+
+# from dwave.plugins.torch.autoencoder.losses.mmd import RadialBasisFunction, mmd_loss
 from dwave.plugins.torch.boltzmann_machine import GraphRestrictedBoltzmannMachine
 
 USE_QPU = True
 NUM_READS = 512
-LOSS_FUNCTION: Literal["kl", "mmd"] = "mmd"
+LOSS_FUNCTION: Literal["kl", "mmd"] = "kl"
 
 
 class Encoder(torch.nn.Module):
@@ -46,7 +48,7 @@ class Encoder(torch.nn.Module):
         x = self.conv(x)
         x = self.flatten_last_two_dims(x)
         x = self.projection(x)
-        return self.flatten(x)
+        return self.flatten(x).clip(-2.8, 2.8)
 
 
 class Decoder(torch.nn.Module):
@@ -56,8 +58,9 @@ class Decoder(torch.nn.Module):
         layers = []
         # The input will be of shape (batch_size, n_latents), we need to project it
         # to the shape (batch_size, n_latents, 2, 2)
-        self.projection = torch.nn.Linear(n_latents, n_latents * 2 * 2)
-        self.unflatten = torch.nn.Unflatten(1, (n_latents, 2, 2))
+        self.increase_latent_dim = torch.nn.Linear(n_latents, n_latents * 2 * 2)
+        self.make_2x2_images = torch.nn.Unflatten(-1, (n_latents, 2, 2))
+        self.merge_batch_dim_and_replica_dim = torch.nn.Flatten(start_dim=0, end_dim=1)
         for i in range(len(channels) - 1):
             # A transposed convolutional layer does not modify the image size
             layers.append(
@@ -80,10 +83,13 @@ class Decoder(torch.nn.Module):
         self.convtrans = torch.nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.projection(x)
-        x = self.unflatten(x)
+        x = self.increase_latent_dim(x)
+        x = self.make_2x2_images(x)
+        batch_dim = x.shape[0]
+        replica_dim = x.shape[1]
+        x = self.merge_batch_dim_and_replica_dim(x)
         x = self.convtrans(x)
-        return x
+        return x.reshape(batch_dim, replica_dim, *x.shape[1:])
 
 
 def get_sampler_and_sampler_kwargs():
@@ -154,45 +160,61 @@ def train_discrete_vae_from_scratch(n_latents: int = 256):
         h_range=h_range,
         j_range=j_range,
     )
+    grbm = grbm.to(device)
 
     optimizer = torch.optim.Adam(
         list(autoencoder.parameters()) + list(grbm.parameters()),
-        lr=1e-3,
+        lr=3e-4,
         weight_decay=1e-5,
     )
 
     mse_losses = []
     other_losses = []
 
+    n_epochs = 40
+    start_time = time.time()
+
+    n_batches = 0
+    for _ in dataloader:
+        n_batches += 1
+
+    total_opt_steps = n_epochs * n_batches
+    opt_step = 0
+
     if LOSS_FUNCTION == "mmd":
-        kernel = RadialBasisFunction(num_features=7)
-        kernel.to(device)
-        loss_name = "MMD"
-        other_loss_constant = 1.0
+        pass
+        # kernel = RadialBasisFunction(num_features=7)
+        # kernel.to(device)
+        # loss_name = "MMD"
+        # other_loss_constant = 1.0
     else:
         kernel = None
         loss_name = "Pseudo KL Divergence"
-        other_loss_constant = 1e-6
-
-    n_epochs = 15
-    start_time = time.time()
+        min_beta = 1e-9
+        max_beta = 1e-3
+        beta_schedule = np.geomspace(min_beta, max_beta, total_opt_steps + 1)
+        other_loss_constant = lambda opt_step: beta_schedule[opt_step]
+    n_replicas = 8
     for epoch in range(n_epochs):
         for batch in dataloader:
             x, _ = batch
             x = x.to(device)
-            x_hat, spins, logits = autoencoder(x)
+            x_hat, spins, logits = autoencoder(x, n_replicas)
 
             optimizer.zero_grad()
-            mse_loss = torch.nn.functional.mse_loss(x_hat, x)
+            mse_loss = torch.nn.functional.mse_loss(
+                x_hat, x.unsqueeze(1).repeat(1, n_replicas, 1, 1, 1)
+            )
             mse_losses.append(mse_loss.item())
             if LOSS_FUNCTION == "mmd":
-                other_loss = mmd_loss(
-                    spins=spins,
-                    kernel=kernel,
-                    boltzmann_machine=grbm,
-                    sampler=sampler,
-                    sampler_kwargs=sampler_kwargs,
-                )
+                pass
+                # other_loss = mmd_loss(
+                #     spins=spins,
+                #     kernel=kernel,
+                #     boltzmann_machine=grbm,
+                #     sampler=sampler,
+                #     sampler_kwargs=sampler_kwargs,
+                # )
             else:
                 other_loss = pseudo_kl_divergence_loss(
                     spins=spins,
@@ -204,13 +226,15 @@ def train_discrete_vae_from_scratch(n_latents: int = 256):
             other_losses.append(other_loss.item())
             # We multiply the pseudo KL divergence by a small constant to have both
             # losses in the same range.
-            loss = mse_loss + other_loss_constant * other_loss
+            c = other_loss_constant(opt_step)
+            loss = mse_loss + c * other_loss
             loss.backward()
             optimizer.step()
+            opt_step += 1
         print(
             f"Epoch {epoch + 1}/{n_epochs} - MSE Loss: {mse_loss.item():.4f} - "
             f"{loss_name} Loss: {other_loss.item():.4f}. Time: "
-            f"{(time.time() - start_time)/60:.2f} mins"
+            f"{(time.time() - start_time)/60:.2f} mins. {loss_name} constant: {c:.3E}"
         )
 
         fig, axes = plt.subplots(2, 1, figsize=(10, 8))
@@ -254,8 +278,8 @@ def train_discrete_vae_from_scratch(n_latents: int = 256):
         plt.close("all")
 
         # Now we generate new samples
-        samples = grbm.sample(sampler, **sampler_kwargs)
-        images = autoencoder.decoder(samples).cpu()
+        samples = grbm.sample(sampler, device=device, **sampler_kwargs)
+        images = autoencoder.decoder(samples).clip(0.0, 1.0).cpu()
         generation_tensor_for_plot = make_grid(images, nrow=images_per_row)
         plt.imshow(generation_tensor_for_plot.permute(1, 2, 0))
         plt.axis("off")
