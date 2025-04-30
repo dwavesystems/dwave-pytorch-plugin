@@ -35,9 +35,12 @@ def pseudo_kl_divergence_loss(
     divergence gradient.
 
     Args:
-        spins (torch.Tensor): A tensor of spins of shape (batch_size, n_spins).
-            The spins are the output of the encoder.
-        logits (torch.Tensor): A tensor of logits of shape (batch_size, n_spins).
+        spins (torch.Tensor): A tensor of spins of shape (batch_size, n_spins) or shape
+            (batch_size, n_samples, n_spins) obtained from a stochastic function that
+            maps the output of the encoder (logit representation) to a spin
+            representation.
+        logits (torch.Tensor): A tensor of logits of shape (batch_size, n_spins). These
+            logits are the raw output of the encoder.
         boltzmann_machine (AbstractBoltzmannMachine): An instance of a Boltzmann
             machine.
         sampler (Sampler): A sampler used for generating samples.
