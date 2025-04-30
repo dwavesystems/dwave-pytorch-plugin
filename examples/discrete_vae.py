@@ -162,9 +162,11 @@ def train_discrete_vae_from_scratch(n_latents: int = 256):
     )
     grbm = grbm.to(device)
 
+    initial_lr = 3e-3
+    final_lr = 1e-4
     optimizer = torch.optim.Adam(
         list(autoencoder.parameters()) + list(grbm.parameters()),
-        lr=3e-4,
+        lr=initial_lr,
         weight_decay=1e-5,
     )
 
@@ -180,6 +182,8 @@ def train_discrete_vae_from_scratch(n_latents: int = 256):
 
     total_opt_steps = n_epochs * n_batches
     opt_step = 0
+
+    lr_schedule = np.geomspace(initial_lr, final_lr, total_opt_steps + 1)
 
     if LOSS_FUNCTION == "mmd":
         pass
@@ -231,10 +235,14 @@ def train_discrete_vae_from_scratch(n_latents: int = 256):
             loss.backward()
             optimizer.step()
             opt_step += 1
+            # Update the learning rate
+            for param_group in optimizer.param_groups:
+                param_group["lr"] = lr_schedule[opt_step]
         print(
             f"Epoch {epoch + 1}/{n_epochs} - MSE Loss: {mse_loss.item():.4f} - "
             f"{loss_name} Loss: {other_loss.item():.4f}. Time: "
-            f"{(time.time() - start_time)/60:.2f} mins. {loss_name} constant: {c:.3E}"
+            f"{(time.time() - start_time)/60:.2f} mins. {loss_name} constant: {c:.3E} "
+            f"Learning rate: {lr_schedule[opt_step]:.3E}"
         )
 
         fig, axes = plt.subplots(2, 1, figsize=(10, 8))
