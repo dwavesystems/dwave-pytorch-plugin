@@ -12,13 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# The use of the auto encoder implementations below (including the
-# AutoEncoder) with a quantum computing system is
+# The use of the discrete auto encoder implementations below (including the
+# DiscreteAutoEncoder) with a quantum computing system is
 # protected by the intellectual property rights of D-Wave Quantum Inc.
 # and its affiliates.
 #
-# The use of the auto encoder implementations below (including the
-# AutoEncoder) with D-Wave's quantum computing
+# The use of the discrete auto encoder implementations below (including the
+# DiscreteAutoEncoder) with D-Wave's quantum computing
 # system will require access to D-Wave’s LeapTM quantum cloud service and
 # will be governed by the Leap Cloud Subscription Agreement available at:
 # https://cloud.dwavesys.com/leap/legal/cloud_subscription_agreement/
@@ -28,11 +28,12 @@ from collections.abc import Callable
 
 import torch
 
-__all__ = ["AutoEncoder"]
+__all__ = ["DiscreteAutoEncoder"]
 
 
-class AutoEncoder(torch.nn.Module):
-    """Autoencoder architecture amenable for training discrete models as priors.
+class DiscreteAutoEncoder(torch.nn.Module):
+    """DiscreteAutoEncoder architecture amenable for training discrete models as priors.
+    See https://iopscience.iop.org/article/10.1088/2632-2153/aba220
 
     Such discrete models include spin-variable models amenable for the QPU. This
     architecture is a modification of the standard autoencoder architecture, where
@@ -43,7 +44,7 @@ class AutoEncoder(torch.nn.Module):
 
     Args:
         encoder (torch.nn.Module): The encoder must output latents that are later on
-            passed to `latent_to_discrete`. An encoder has signature (x) -> l. x has
+            passed to ``latent_to_discrete``. An encoder has signature (x) -> l. x has
             shape (batch_size, f1, f2, ...) and l has shape (batch_size, l1, l2, ...).
         decoder (torch.nn.Module): Decodes discrete tensors into data tensors. A decoder
             has signature (d) -> x'. d has shape (batch_size, n, d1, d2, ...) and x' has
@@ -54,11 +55,11 @@ class AutoEncoder(torch.nn.Module):
             a number of discrete representations to be created from a single latent
             representation of a single initial data point.
         latent_to_discrete (Callable[[torch.Tensor, int], torch.Tensor] | None): A
-            stochastic function that maps the output of the encoder to a discrete
-            representation. Importantly, since the function is stochastic, it allows for
-            the creation of multiple discrete representations from the latent
-            representation of a single data point. Thus, the signature of this function
-            is (l, n) -> d, where l is the output of the encoder and has shape
+            stochastic and differentiable function that maps the output of the encoder
+            to a discrete representation. Importantly, since the function is stochastic,
+            it allows for the creation of multiple discrete representations from the
+            latent representation of a single data point. Thus, the signature of this
+            function is (l, n) -> d, where l is the output of the encoder and has shape
             (batch_size, l1, l2, ...), n is the number of discrete representations per
             data point, and d has shape (batch_size, n, d1, d2, ...), which will be the
             input to the decoder. If None, the gumbel softmax function is used for
@@ -94,18 +95,37 @@ class AutoEncoder(torch.nn.Module):
                 one_hots = torch.nn.functional.gumbel_softmax(
                     logits, tau=1 / 7, hard=True
                 )
+                # The constant 1/7 is used because it was used in
+                # https://iopscience.iop.org/article/10.1088/2632-2153/aba220
+
                 # one_hots is of shape (batch_size, n_samples, n_discrete, 2), we need
                 # to take the first element of the last dimension and convert it to spin
                 # variables to make the latent space compatible with QPU models.
                 return one_hots[..., 0] * 2 - 1
 
-            latent_to_discrete = _latent_to_discrete
-
-        self.latent_to_discrete = latent_to_discrete
+            self.latent_to_discrete = _latent_to_discrete
+        else:
+            self.latent_to_discrete = latent_to_discrete
 
     def forward(
         self, x: torch.Tensor, n_samples: int = 1
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Ingests data into the DiscreteAutoEncoder
+
+        Args:
+            x (torch.Tensor): Input data of shape (batch_size, ...)
+            n_samples (int, optional): Since the ``latent_to_discrete`` map is, in
+                general, stochastic, several different discrete samples can be obtained
+                by applying this map to the same encoded data point. This argument
+                specifies how many such samples are obtained. Defaults to 1.
+
+        Returns:
+            tuple[torch.Tensor, torch.Tensor, torch.Tensor]: The reconstructed data of
+            shape (batch_size, n_samples, ...), the discrete representation(s) of the
+            encoded data with the shape (batch_size, n_samples, ...), and the logits,
+            which are the encoded data of shape (batch_size, ...).
+        """
         logits = self.encoder(x)
         discretes = self.latent_to_discrete(logits, n_samples)
         reconstructed_x = self.decoder(discretes)
