@@ -12,4 +12,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from dwave.plugins.torch.autoencoder.ae import AutoEncoder
+from dwave.plugins.torch.autoencoder.autoencoder import *
