@@ -124,7 +124,10 @@ class AbstractBoltzmannMachine(ABC, torch.nn.Module):
         return self(s_observed).mean() - self(s_model).mean()
 
     def sample(
-        self, sampler: Sampler, device: torch.device = None, **sample_params: dict
+        self,
+        sampler: Sampler,
+        device: torch.device | None = None,
+        **sample_params: dict,
     ) -> torch.Tensor:
         """Sample from the Boltzmann machine.
 
@@ -169,8 +172,8 @@ class GraphRestrictedBoltzmannMachine(AbstractBoltzmannMachine):
         edge_idx_i: torch.Tensor,
         edge_idx_j: torch.Tensor,
         *,
-        h_range: tuple = None,
-        j_range: tuple = None,
+        h_range: tuple | None = None,
+        j_range: tuple | None = None,
     ):
         super().__init__(h_range=h_range, j_range=j_range)
 
