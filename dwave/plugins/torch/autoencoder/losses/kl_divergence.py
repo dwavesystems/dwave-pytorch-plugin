@@ -29,7 +29,9 @@ def pseudo_kl_divergence_loss(
 ):
     """
     A pseudo Kullback-Leibler divergence loss function for a discrete autoencoder with a
-    Boltzmann machine prior. This is not the true KL divergence, but the gradient of
+    Boltzmann machine prior.
+
+    This is not the true KL divergence, but the gradient of
     this function is the same as the KL divergence gradient.
 
     Args:
