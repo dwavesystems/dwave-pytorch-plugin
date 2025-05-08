@@ -31,8 +31,8 @@ def pseudo_kl_divergence_loss(
     A pseudo Kullback-Leibler divergence loss function for a discrete autoencoder with a
     Boltzmann machine prior.
 
-    This is not the true KL divergence, but the gradient of
-    this function is the same as the KL divergence gradient.
+    This is not the true KL divergence, but the gradient of this function is the same as
+    the KL divergence gradient. See https://arxiv.org/abs/1609.02200 for more details.
 
     Args:
         spins (torch.Tensor): A tensor of spins of shape (batch_size, n_spins) or shape
