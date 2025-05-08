@@ -19,8 +19,6 @@ from dwave.plugins.torch.boltzmann_machine import AbstractBoltzmannMachine
 
 __all__ = ["pseudo_kl_divergence_loss"]
 
-binary_cross_entropy_with_logits = torch.nn.BCEWithLogitsLoss()
-
 
 def pseudo_kl_divergence_loss(
     spins: torch.Tensor,
@@ -54,7 +52,9 @@ def pseudo_kl_divergence_loss(
         sampler=sampler, device=spins.device, **sampler_kwargs
     )
     probabilities = torch.sigmoid(logits)
-    entropy_of_encoder = binary_cross_entropy_with_logits(logits, probabilities)
+    entropy_of_encoder = torch.nn.functional.binary_cross_entropy_with_logits(
+        logits, probabilities
+    )
     cross_entropy = torch.mean(boltzmann_machine(spins)) - torch.mean(
         boltzmann_machine(samples)
     )
