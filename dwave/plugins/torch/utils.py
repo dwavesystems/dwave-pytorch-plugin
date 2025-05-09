@@ -15,41 +15,18 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import networkx as nx
 import numpy as np
 import torch
+
 from dimod import SampleSet
 from hybrid.composers import AggregatedSamples
-from dwave.system import FixedEmbeddingComposite
 
 if TYPE_CHECKING:
-    from dwave.system import DWaveSampler
+    from dimod import Sampler
+
+from dwave.plugins.torch.boltzmann_machine import GraphRestrictedBoltzmannMachine
 
 spread = AggregatedSamples.spread
-
-
-def make_sampler_and_graph(
-    qpu: DWaveSampler,
-) -> tuple[FixedEmbeddingComposite, nx.Graph, dict]:
-    """A helper function that maps a QPU's variables to contiguous nonnegative integers.
-
-    Mapping variables to contiguous nonnegative integers is a requirement motivated by
-    convenience and efficiency for applying tensor operations downstream.
-
-    Args:
-        qpu (DWaveSampler): The ``dwave.system.DWaveSampler`` QPU for which an embedded
-            composite sampler with linear variables is created.
-
-    Returns:
-        tuple[FixedEmbeddingComposite, nx.Graph]: The sampler with linear
-            variables and its corresponding graph.
-    """
-    G = qpu.to_networkx_graph()
-    mapping = {physical: logical for physical, logical in zip(G, range(len(G)))}
-
-    G = nx.relabel_nodes(G, mapping)
-    sampler = FixedEmbeddingComposite(qpu, {l_: [p] for p, l_ in mapping.items()})
-    return sampler, G
 
 
 def sample_to_tensor(
@@ -73,3 +50,59 @@ def sample_to_tensor(
     sample = sample_set.record.sample[:, indices]
 
     return torch.tensor(sample, dtype=torch.float32, device=device)
+
+
+def sample(
+    grbm: GraphRestrictedBoltzmannMachine,
+    sampler: Sampler,
+    beta_correction: float,
+    device: torch.device = None,
+    **sample_params: dict,
+) -> torch.Tensor:
+    """Sample from the Boltzmann machine.
+
+    This method samples and converts a sample of spins to tensors and ensures they
+    are not aggregated---provided the aggregation information is retained in the
+    sample set.
+
+    Args:
+        sampler (Sampler): The sampler used to sample from the model.
+        sampler_params (dict): Parameters of the `sampler.sample` method.
+        device (torch.device, optional): The device of the constructed tensor.
+            If ``None`` and data is a tensor then the device of data is used.
+            If ``None`` and data is not a tensor then the result tensor is
+            constructed on the current device.
+
+    Returns:
+        torch.Tensor: Spins sampled from the model
+            (shape prescribed by ``sampler`` and ``sample_params``).
+    """
+    h, J = grbm.ising(beta_correction)
+    ss = spread(sampler.sample_ising(h, J, **sample_params))
+    spins = sample_to_tensor(ss, device=device)
+    return spins
+
+
+def grbm_objective(
+    grbm: GraphRestrictedBoltzmannMachine,
+    s_observed: torch.Tensor,
+    s_model: torch.Tensor,
+) -> torch.Tensor:
+    """An objective function with gradients equivalent to the gradients of the
+    negative log likelihood.
+
+    Args:
+        s_observed (torch.Tensor): Tensor of observed spins (data) with shape
+            (b1, N) where b1 denotes the batch size and N denotes the number of
+            variables in the model.
+        s_model (torch.Tensor): Tensor of spins drawn from the model with shape
+            (b2, N) where b2 denotes the batch size and N denotse the number of
+            variables in the model.
+
+    Returns:
+        torch.Tensor: Scalar difference of the average energy of data and model.
+    """
+    return (
+        grbm.sufficient_statistics(s_observed).mean(0, True)
+        - grbm.sufficient_statistics(s_model).mean(0, True)
+    ) @ grbm.theta

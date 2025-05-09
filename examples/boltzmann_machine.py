@@ -15,7 +15,7 @@
 import torch
 
 from dwave.plugins.torch.boltzmann_machine import GraphRestrictedBoltzmannMachine
-from dwave.plugins.torch.utils import make_sampler_and_graph
+from dwave.plugins.torch.utils import sample, grbm_objective
 from dwave.system import DWaveSampler
 from torch.optim import SGD
 from dwave.samplers import SimulatedAnnealingSampler
@@ -28,13 +28,8 @@ if __name__ == "__main__":
     SAMPLE_SIZE = 17
 
     if USE_QPU:
-        qpu = DWaveSampler(solver="Advantage2_prototype2.6")
-        h_range, j_range = qpu.properties["h_range"], qpu.properties["j_range"]
-        # A helper function that wraps the QPU with a
-        # `dwave.system.FixedEmbeddingComposite` so it can sample a model with
-        # contiguous nonnegative integer variable names---this is an implementation
-        # requirement of the graph-restricted Boltzmann machine
-        sampler, G = make_sampler_and_graph(qpu)
+        sampler = DWaveSampler(solver="Advantage2_prototype2.6")
+        G = sampler.to_networkx_graph()
         sample_kwargs = dict(
             num_reads=NUM_READS,
             # Set `answer_mode` to "raw" so no samples are aggregated
@@ -52,31 +47,27 @@ if __name__ == "__main__":
             proposal_acceptance_criterion="Gibbs",
             randomize_order=True,
         )
-        h_range = j_range = None
         G = zephyr_graph(1)
-
-    num_nodes = G.number_of_nodes()
 
     # Generate fake data to fit the Boltzmann machine to
     # Make sure ``x`` is of type float
-    x = 1 - 2.0 * torch.randint(0, 2, (SAMPLE_SIZE, num_nodes))
+    x = 1 - 2.0 * torch.randint(0, 2, (SAMPLE_SIZE, G.number_of_nodes()))
 
     # Instantiate the model
-    grbm = GraphRestrictedBoltzmannMachine(
-        num_nodes, *torch.tensor(list(G.edges)).mT, h_range=h_range, j_range=j_range
-    )
+    grbm = GraphRestrictedBoltzmannMachine(G.nodes, G.edges)
 
     # Instantiate the optimizer
     opt_grbm = SGD(grbm.parameters())
 
     # Example of one iteration in a training loop
     # Generate a sample set from the model
-    s = grbm.sample(sampler, **sample_kwargs)
+    s = sample(grbm, sampler, 1 / 10.0, **sample_kwargs)
+    grbm(s)
     # Reset the gradients of the model weights
     opt_grbm.zero_grad()
     # Compute the objective---this objective yields the same gradient as the negative
     # log likelihood of the model
-    objective = grbm.objective(x, s)
+    objective = grbm_objective(grbm, x, s)
     # Backpropgate gradients
     objective.backward()
     # Update model weights with a step of stochastic gradient descent

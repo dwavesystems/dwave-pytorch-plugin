@@ -14,33 +14,68 @@
 
 import unittest
 
-import networkx as nx
+import torch
 
-from dimod import SPIN, SampleSet
-from torch import Tensor
+from dimod import SPIN, SampleSet, IdentitySampler
 
-from dwave.plugins.torch.utils import make_sampler_and_graph, sample_to_tensor
-from dwave.system.testing import MockDWaveSampler
-from dwave.embedding import is_valid_embedding
+from dwave.plugins.torch.boltzmann_machine import (
+    GraphRestrictedBoltzmannMachine as GRBM,
+)
+from dwave.plugins.torch.utils import sample_to_tensor, grbm_objective, sample
 
 
 class TestUtils(unittest.TestCase):
-
-    def test_make_sampler_and_graph(self):
-        qpu = MockDWaveSampler(topology_type="zephyr", topology_shape=(1, 4))
-        qpu.nodelist = [1, 2, 34, 35]
-        qpu.edgelist = [(1, 34), (2, 34), (34, 35)]
-        T = nx.from_edgelist(qpu.edgelist)
-        sampler, S = make_sampler_and_graph(qpu)
-        self.assertSetEqual(set(S.nodes), {0, 1, 2, 3})
-        self.assertTrue(nx.algorithms.is_isomorphic(S, T))
-        self.assertTrue(is_valid_embedding(sampler.embedding, S, T))
 
     def test_sample_to_tensor(self):
         ss = SampleSet.from_samples([[1, -1], [1, 1], [1, 1]], SPIN, [-1, 2, 2])
         spins = sample_to_tensor(ss)
         self.assertTupleEqual((3, 2), tuple(spins.shape))
-        self.assertIsInstance(spins, Tensor)
+        self.assertIsInstance(spins, torch.Tensor)
+
+    def test_sample(self):
+        grbm = GRBM(list("abcd"), [("a", "b")])
+        spins = sample(
+            grbm,
+            IdentitySampler(),
+            beta_correction=1,
+            initial_states=([[1, 1, 1, 1], [1, 1, 1, 1], [-1, -1, 1, -1]], "abcd"),
+        )
+        self.assertTupleEqual((3, 4), tuple(spins.shape))
+        self.assertIsInstance(spins, torch.Tensor)
+
+    def test_grbm_objective(self):
+        # Create a triangle graph with an additional dangling vertex
+        self.nodes = list("abcd")
+        self.edges = [["a", "b"], ["a", "c"], ["a", "d"], ["b", "c"]]
+        self.n = 4
+
+        # Manually set the parameter weights for testing
+        dtype = torch.float32
+        h = [0.0, 1, 2, 3]
+
+        grbm = GRBM(self.nodes, self.edges)
+        grbm.h.data = torch.tensor(h, dtype=dtype)
+        grbm.J.data = torch.tensor([1, 2, 3, 6], dtype=dtype)
+
+        # Test the gradient matches
+        ones = torch.ones((1, 4))
+        mones = -ones
+        with self.subTest("Test gradients"):
+            obj = grbm_objective(grbm, ones, mones)
+            obj.backward()
+            t1 = grbm.sufficient_statistics(ones)
+            t2 = grbm.sufficient_statistics(mones)
+            grad_auto = grbm.h.grad.tolist() + grbm.J.grad.tolist()
+            self.assertListEqual(grad_auto, (t1.mean(0) - t2.mean(0)).tolist())
+
+        pmones = torch.tensor([[1, -1, 1, -1]], dtype=dtype)
+        mpones = torch.tensor([[-1, 1, -1, 1]], dtype=dtype)
+        with self.subTest("Test objective value matches"):
+            s1 = torch.vstack([ones, ones, ones, pmones])
+            s2 = torch.vstack([ones, ones, ones, mpones])
+            s3 = torch.vstack([s2, s2])
+            self.assertEqual(-1, grbm_objective(grbm, s1, s2).item())
+            self.assertEqual(-1, grbm_objective(grbm, s1, s3))
 
 
 if __name__ == "__main__":
