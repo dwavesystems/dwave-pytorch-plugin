@@ -147,7 +147,7 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         """
         if sample_params is None:
             sample_params = dict()
-        h, J = self.ising(sampler_beta)
+        h, J = self.ising(1 / sampler_beta)
         ss = spread(sampler.sample_ising(h, J, **sample_params))
         spins = self.sample_to_tensor(ss, device=device)
         return spins
