@@ -188,7 +188,7 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         grbm = GRBM(list("abcd"), [("a", "b")])
         spins = grbm.sample(
             IdentitySampler(),
-            sampler_beta=1,
+            prefactor=1,
             sample_params=dict(
                 initial_states=([[1, 1, 1, 1], [1, 1, 1, 1], [-1, -1, 1, -1]], "abcd")
             ),

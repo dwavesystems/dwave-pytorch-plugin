@@ -118,7 +118,7 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
     def sample(
         self,
         sampler: Sampler,
-        sampler_beta: float,
+        prefactor: float,
         device: torch.device = None,
         sample_params: dict = None,
     ) -> torch.Tensor:
@@ -130,11 +130,14 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
 
         Args:
             sampler (Sampler): The sampler used to sample from the model.
-            sampler_beta (float): The effective inverse temperature for which the
-                sampler operates at. Typically, this is one for classical samplers such
-                as Metropolis- or Gibbs-based samplers, and greater than one for analog
-                samplers such as a quantum annealer. This quantity can be estimated for
-                QPUs using the :meth:`GraphRestrictedBoltzmannMachine.estimate_beta`.
+            prefactor (float): The prefactor for which the Hamiltonian is scaled by.
+                This quantity is typically the temperature at which the sampler operates
+                at. Standard CPU-based samplers such as Metropolis- or Gibbs-based
+                samplers will often default to sampling at an unit temperature, thus a
+                unit prefactor should be used. In the case of a quantum annealer, a
+                reasonable choice of a prefactor is 1/beta where beta is the effective
+                inverse temperature and can be estimated using
+                :meth:`GraphRestrictedBoltzmannMachine.estimate_beta`.
             device (torch.device, optional): The device of the constructed tensor.
                 If ``None`` and data is a tensor then the device of data is used.
                 If ``None`` and data is not a tensor then the result tensor is
@@ -147,7 +150,7 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         """
         if sample_params is None:
             sample_params = dict()
-        h, J = self.ising(1 / sampler_beta)
+        h, J = self.ising(prefactor)
         ss = spread(sampler.sample_ising(h, J, **sample_params))
         spins = self.sample_to_tensor(ss, device=device)
         return spins
