@@ -48,8 +48,8 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
     Args:
         nodes (list): List of nodes.
         edges (list): List of edges.
-        hiddens (list): List of hidden nodes. Each hidden node should also be listed in
-            the input ``nodes``.
+        hiddens (list, optional): List of hidden nodes. Each hidden node should also be
+            listed in the input ``nodes``.
     """
 
     def __init__(self, nodes: list, edges: list, hiddens: list = None, *args, **kwargs):
@@ -110,14 +110,17 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
 
     @property
     def theta(self) -> torch.Tensor:
+        """Parameters of the model---linear and quadratic biases---as a one-dimensional
+        tensor. The linear and quadratic biases are concatenated in the order as defined
+        by the model's input ``nodes`` and ``edges``."""
         return torch.cat([self.h, self.J])
 
     def sample(
         self,
         sampler: Sampler,
-        beta_correction: float,
+        sampler_beta: float,
         device: torch.device = None,
-        **sample_params: dict,
+        sample_params: dict = None,
     ) -> torch.Tensor:
         """Sample from the Boltzmann machine.
 
@@ -127,17 +130,24 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
 
         Args:
             sampler (Sampler): The sampler used to sample from the model.
-            sampler_params (dict): Parameters of the `sampler.sample` method.
+            sampler_beta (float): The effective inverse temperature for which the
+                sampler operates at. Typically, this is one for classical samplers such
+                as Metropolis- or Gibbs-based samplers, and greater than one for analog
+                samplers such as a quantum annealer. This quantity can be estimated for
+                QPUs using the :meth:`GraphRestrictedBoltzmannMachine.estimate_beta`.
             device (torch.device, optional): The device of the constructed tensor.
                 If ``None`` and data is a tensor then the device of data is used.
                 If ``None`` and data is not a tensor then the result tensor is
                 constructed on the current device.
+            sampler_params (dict): Parameters of the `sampler.sample` method.
 
         Returns:
             torch.Tensor: Spins sampled from the model
                 (shape prescribed by ``sampler`` and ``sample_params``).
         """
-        h, J = self.ising(beta_correction)
+        if sample_params is None:
+            sample_params = dict()
+        h, J = self.ising(sampler_beta)
         ss = spread(sampler.sample_ising(h, J, **sample_params))
         spins = self.sample_to_tensor(ss, device=device)
         return spins
@@ -163,7 +173,7 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         return torch.tensor(sample, dtype=torch.float32, device=device)
 
     def objective(
-        self, s_observed: torch.Tensor, s_model: torch.Tensor, measured_beta: float
+        self, s_observed: torch.Tensor, s_model: torch.Tensor
     ) -> torch.Tensor:
         """An objective function with gradients equivalent to the gradients of the
         negative log likelihood.
@@ -182,7 +192,7 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         if self.fully_visible:
             obs = s_observed
         else:
-            obs = self._compute_expectation_disconnected(s_observed, measured_beta)
+            obs = self._compute_expectation_disconnected(s_observed)
 
         return (
             self.sufficient_statistics(obs).mean(0, True)
@@ -223,18 +233,18 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
                 variables in the model.
 
         Returns:
-            tuple[torch.Tensor, torch.Tensor]: The sufficient statistics of ``x``.
+            torch.Tensor: The sufficient statistics of ``x``.
         """
         interactions = self.interactions(x)
         return torch.cat([x, interactions], 1)
 
-    def ising(self, beta) -> tuple[dict, dict]:
+    def ising(self, prefactor) -> tuple[dict, dict]:
         """Convert the model to Ising format"""
-        linear_bias_list = (beta * self.h.detach()).cpu().tolist()
+        linear_bias_list = (prefactor * self.h.detach()).cpu().tolist()
         linear_biases = {self.idx_to_var[i]: b for i, b in enumerate(linear_bias_list)}
         edge_idx_i = self.edge_idx_i.detach().cpu().tolist()
         edge_idx_j = self.edge_idx_j.detach().cpu().tolist()
-        quadratic_bias_list = (beta * self.J.detach()).cpu().tolist()
+        quadratic_bias_list = (prefactor * self.J.detach()).cpu().tolist()
         quadratic_biases = {
             (self.idx_to_var[a], self.idx_to_var[b]): w
             for a, b, w in zip(edge_idx_i, edge_idx_j, quadratic_bias_list)
@@ -309,21 +319,13 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
 
         return h_eff
 
-    def _compute_expectation_disconnected(
-        self, obs: torch.Tensor, beta: float
-    ) -> torch.Tensor:
+    def _compute_expectation_disconnected(self, obs: torch.Tensor) -> torch.Tensor:
         """Compute and return the conditional expectation of spins including observed
         spins.
 
         Args:
             obs (torch.Tensor): A tensor of spins with shape (b, N) where b is the
                 sample size and N is the number of visible units in the model.
-
-            beta (float): The effective inverse temperature of the model and sampler.
-                This quantity is, in the typical context of using a D-Wave QPU,
-                estimated with samples from the QPU and
-                :meth:`AbstractBoltzmannMachine.estimate_beta`.
-
         Returns:
             torch.Tensor: A (b, N)-shaped tensor of expected spins conditioned on
                 ``obs`` where b is the sample size and N is the total number of
@@ -331,11 +333,11 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         """
         m = self._pad(obs)
         h_eff = self._compute_effective_field(m)
-        m[:, self.hidx] = -torch.tanh(h_eff * beta)
+        m[:, self.hidx] = -torch.tanh(h_eff)
         return m
 
-    def bqm(self, beta):
-        bqm = BinaryQuadraticModel.from_ising(*self.ising(beta))
+    def bqm(self, prefactor):
+        bqm = BinaryQuadraticModel.from_ising(*self.ising(prefactor))
         return bqm
 
 

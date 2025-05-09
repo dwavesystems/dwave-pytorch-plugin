@@ -126,15 +126,13 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         #           \ 1 /
         grbm.h.data = torch.tensor([-0.1, -0.2, 0.4])
         grbm.J.data = torch.tensor([-0.7, 0.13, -0.17])
-        beta = 1.337
         obs = torch.tensor([[-1.0, 1.0]])
-        expected = grbm._compute_expectation_disconnected(obs, beta)[0].tolist()
+        expected = grbm._compute_expectation_disconnected(obs)[0].tolist()
         self.assertListEqual(expected[:2], [-1, 1])
         # effective field = quadratic(0,1) + quadratic(0,2) + linear(2)
         #                 = -0.13 - 0.17 + 0.4 = 0.1
-        # expectation = -tanh(beta*effective field) = tanh(0.1 * 1.337)
-        # -tanh(0.1337) ~= -0.132909
-        self.assertAlmostEqual(expected[-1], -0.132909)
+        # expectation = -tanh(effective field) = tanh(0.1 * 1.337)
+        self.assertAlmostEqual(expected[-1], -torch.tanh(torch.tensor(0.1)).item())
 
     def test_sufficient_statistics(self):
         t0 = self.bm.sufficient_statistics(self.ones)
@@ -190,8 +188,10 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         grbm = GRBM(list("abcd"), [("a", "b")])
         spins = grbm.sample(
             IdentitySampler(),
-            beta_correction=1,
-            initial_states=([[1, 1, 1, 1], [1, 1, 1, 1], [-1, -1, 1, -1]], "abcd"),
+            sampler_beta=1,
+            sample_params=dict(
+                initial_states=([[1, 1, 1, 1], [1, 1, 1, 1], [-1, -1, 1, -1]], "abcd")
+            ),
         )
         self.assertTupleEqual((3, 4), tuple(spins.shape))
         self.assertIsInstance(spins, torch.Tensor)
@@ -214,7 +214,7 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         ones = torch.ones((1, 4))
         mones = -ones
         with self.subTest("Test gradients"):
-            obj = grbm.objective(ones, mones, 1)
+            obj = grbm.objective(ones, mones)
             obj.backward()
             t1 = grbm.sufficient_statistics(ones)
             t2 = grbm.sufficient_statistics(mones)
@@ -227,8 +227,8 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
             s1 = torch.vstack([ones, ones, ones, pmones])
             s2 = torch.vstack([ones, ones, ones, mpones])
             s3 = torch.vstack([s2, s2])
-            self.assertEqual(-1, grbm.objective(s1, s2, 1).item())
-            self.assertEqual(-1, grbm.objective(s1, s3, 1))
+            self.assertEqual(-1, grbm.objective(s1, s2).item())
+            self.assertEqual(-1, grbm.objective(s1, s3))
 
 
 if __name__ == "__main__":
