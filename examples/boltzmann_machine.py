@@ -11,21 +11,21 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 import torch
 
-from dwave.plugins.torch.boltzmann_machine import GraphRestrictedBoltzmannMachine
-from dwave.plugins.torch.utils import sample, grbm_objective
-from dwave.system import DWaveSampler
-from torch.optim import SGD
 from dwave.samplers import SimulatedAnnealingSampler
-from dwave_networkx import zephyr_graph
+from dwave.system import DWaveSampler
+from dwave_networkx import zephyr_graph, zephyr_coordinates, zephyr_four_color
+from torch.optim import SGD
+
+from dwave.plugins.torch.boltzmann_machine import GraphRestrictedBoltzmannMachine
 
 
 if __name__ == "__main__":
-    USE_QPU = False
+    USE_QPU = True
     NUM_READS = 100
     SAMPLE_SIZE = 17
+    FULLY_VISIBLE = False
 
     if USE_QPU:
         sampler = DWaveSampler(solver="Advantage2_prototype2.6")
@@ -47,27 +47,37 @@ if __name__ == "__main__":
             proposal_acceptance_criterion="Gibbs",
             randomize_order=True,
         )
-        G = zephyr_graph(1)
+        G = zephyr_graph(6)
+
+    if FULLY_VISIBLE:
+        hiddens = None
+        n_vis = G.number_of_nodes()
+    else:
+        linear_to_zephyr = zephyr_coordinates(6).linear_to_zephyr
+        qubit_colour = {g: zephyr_four_color(linear_to_zephyr(g)) for g in G}
+        hiddens = [q for q, c in qubit_colour.items() if c == 0]
+        n_hid = len(hiddens)
+        n_vis = G.number_of_nodes() - n_hid
 
     # Generate fake data to fit the Boltzmann machine to
     # Make sure ``x`` is of type float
-    x = 1 - 2.0 * torch.randint(0, 2, (SAMPLE_SIZE, G.number_of_nodes()))
+    x = 1 - 2.0 * torch.randint(0, 2, (SAMPLE_SIZE, n_vis))
 
     # Instantiate the model
-    grbm = GraphRestrictedBoltzmannMachine(G.nodes, G.edges)
+    grbm = GraphRestrictedBoltzmannMachine(G.nodes, G.edges, hiddens)
 
     # Instantiate the optimizer
     opt_grbm = SGD(grbm.parameters())
 
     # Example of one iteration in a training loop
     # Generate a sample set from the model
-    s = sample(grbm, sampler, 1 / 10.0, **sample_kwargs)
-    grbm(s)
+    s = grbm.sample(sampler, 1 / 6, **sample_kwargs)
     # Reset the gradients of the model weights
     opt_grbm.zero_grad()
     # Compute the objective---this objective yields the same gradient as the negative
     # log likelihood of the model
-    objective = grbm_objective(grbm, x, s)
+    measured_beta = grbm.estimate_beta(s)
+    objective = grbm.objective(x, s, measured_beta)
     # Backpropgate gradients
     objective.backward()
     # Update model weights with a step of stochastic gradient descent
