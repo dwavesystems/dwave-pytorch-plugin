@@ -11,30 +11,25 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 import torch
 
-from dwave.plugins.torch.boltzmann_machine import GraphRestrictedBoltzmannMachine
-from dwave.plugins.torch.utils import make_sampler_and_graph
-from dwave.system import DWaveSampler
-from torch.optim import SGD
 from dwave.samplers import SimulatedAnnealingSampler
-from dwave_networkx import zephyr_graph
+from dwave.system import DWaveSampler
+from dwave_networkx import zephyr_graph, zephyr_coordinates, zephyr_four_color
+from torch.optim import SGD
+
+from dwave.plugins.torch.boltzmann_machine import GRBM
 
 
 if __name__ == "__main__":
-    USE_QPU = False
+    USE_QPU = True
     NUM_READS = 100
     SAMPLE_SIZE = 17
+    FULLY_VISIBLE = True
 
     if USE_QPU:
-        qpu = DWaveSampler(solver="Advantage2_prototype2.6")
-        h_range, j_range = qpu.properties["h_range"], qpu.properties["j_range"]
-        # A helper function that wraps the QPU with a
-        # `dwave.system.FixedEmbeddingComposite` so it can sample a model with
-        # contiguous nonnegative integer variable names---this is an implementation
-        # requirement of the graph-restricted Boltzmann machine
-        sampler, G = make_sampler_and_graph(qpu)
+        sampler = DWaveSampler(solver="Advantage2_prototype2.6")
+        G = sampler.to_networkx_graph()
         sample_kwargs = dict(
             num_reads=NUM_READS,
             # Set `answer_mode` to "raw" so no samples are aggregated
@@ -43,6 +38,8 @@ if __name__ == "__main__":
             # distribution
             auto_scale=False,
         )
+        h_range = sampler.properties["h_range"]
+        j_range = sampler.properties["j_range"]
     else:
         # Use an MCMC sampler that can sample from the equilibrium distribution
         sampler = SimulatedAnnealingSampler()
@@ -52,26 +49,34 @@ if __name__ == "__main__":
             proposal_acceptance_criterion="Gibbs",
             randomize_order=True,
         )
+        G = zephyr_graph(6)
         h_range = j_range = None
-        G = zephyr_graph(1)
 
-    num_nodes = G.number_of_nodes()
+    if FULLY_VISIBLE:
+        hiddens = None
+        n_vis = G.number_of_nodes()
+    else:
+        linear_to_zephyr = zephyr_coordinates(6).linear_to_zephyr
+        qubit_colour = {g: zephyr_four_color(linear_to_zephyr(g)) for g in G}
+        hiddens = [q for q, c in qubit_colour.items() if c == 0]
+        n_hid = len(hiddens)
+        n_vis = G.number_of_nodes() - n_hid
 
     # Generate fake data to fit the Boltzmann machine to
     # Make sure ``x`` is of type float
-    x = 1 - 2.0 * torch.randint(0, 2, (SAMPLE_SIZE, num_nodes))
+    x = 1 - 2.0 * torch.randint(0, 2, (SAMPLE_SIZE, n_vis))
 
     # Instantiate the model
-    grbm = GraphRestrictedBoltzmannMachine(
-        num_nodes, *torch.tensor(list(G.edges)).mT, h_range=h_range, j_range=j_range
-    )
+    grbm = GRBM(G.nodes, G.edges, hiddens, h_range, j_range)
 
     # Instantiate the optimizer
     opt_grbm = SGD(grbm.parameters())
 
+    measured_beta = 7
     # Example of one iteration in a training loop
     # Generate a sample set from the model
-    s = grbm.sample(sampler, **sample_kwargs)
+    s = grbm.sample(sampler, 1 / measured_beta, sample_params=sample_kwargs)
+    measured_beta = grbm.estimate_beta(s)
     # Reset the gradients of the model weights
     opt_grbm.zero_grad()
     # Compute the objective---this objective yields the same gradient as the negative
