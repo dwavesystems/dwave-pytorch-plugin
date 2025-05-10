@@ -16,7 +16,7 @@ import unittest
 
 import torch
 
-from dimod import BinaryQuadraticModel, SampleSet, SPIN, IdentitySampler
+from dimod import SampleSet, SPIN, IdentitySampler
 from dwave.system.temperatures import maximum_pseudolikelihood_temperature as mple
 
 from dwave.plugins.torch.boltzmann_machine import GRBM
@@ -25,7 +25,11 @@ from dwave.plugins.torch.boltzmann_machine import GRBM
 class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
     def setUp(self) -> None:
         # Create a triangle graph with an additional dangling vertex
-        self.nodes = list("abcd")
+        #       a
+        #     / | \
+        #    b--c  d
+        # Note the node order is deliberately "dbac" in order to test variable orderings
+        self.nodes = list("dbac")
         self.edges = [["a", "b"], ["a", "c"], ["a", "d"], ["b", "c"]]
         self.n = 4
 
@@ -48,13 +52,33 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         self.sample_2 = torch.vstack([self.ones, self.ones, self.ones, self.mpones])
         return super().setUp()
 
+    def test_constructor(self):
+        self.assertListEqual(list("dbac"), self.bm.ordered_vars)
+        self.assertListEqual(
+            [self.bm.idx_to_var[i] for i in range(self.bm.n)], self.bm.ordered_vars
+        )
+
     def test_forward(self):
+        # Model for reference:
+        #       a
+        #     / | \
+        #    b--c  d
+        # Linear biases for reference:
+        # 0 1 2 3
+        # d b a c
+        # Edge list and weights for reference:
+        # [["a", "b"], ["a", "c"], ["a", "d"], ["b", "c"]]
+        #       1           2           3           6
         with self.subTest("Manually-computed energies"):
             self.assertEqual(18, self.bm(self.ones).item())
             self.assertEqual(6, self.bm(self.mones).item())
-            self.assertEqual(-10, self.bm(self.pmones).item())
-            self.assertEqual(-6, self.bm(self.mpones).item())
-            self.assertListEqual([18, 18, 18, -10], self.bm(self.sample_1).tolist())
+            # 1 -1 1 -1
+            # d  b a  c
+            self.assertEqual(4, self.bm(self.pmones).item())
+            # -1 1 -1 1
+            #  d b  a c
+            self.assertEqual(8, self.bm(self.mpones).item())
+            self.assertListEqual([18, 18, 18, 4], self.bm(self.sample_1).tolist())
 
         with self.subTest(
             "Arbitrary-valued weights and spins should match dimod.BQM energy"
@@ -63,36 +87,21 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
             new_J = torch.linspace(-0.4, 4, 4**2)
             self.bm.J.data = new_J[: len(self.bm.J)]
 
-            bqm = BinaryQuadraticModel.from_ising(*self.bm.ising(1))
+            bqm = self.bm.bqm
 
             fake_spins = 1.0 * torch.arange(1, 5).unsqueeze(0)
 
-            en_bqm = bqm.energies((fake_spins.numpy(), bqm.variables)).item()
+            en_bqm = bqm.energies((fake_spins.numpy(), "dbac")).item()
             en_boltz = self.bm(fake_spins).item()
             self.assertAlmostEqual(en_bqm, en_boltz, 4)
 
     def test_estimate_beta(self):
-        s1 = self.sample_1
-        s2 = self.sample_2
-        s3 = torch.vstack([self.sample_2, self.sample_2])
-        bqm = self.bm.bqm(1)
-        self.assertEqual(
-            1.0 / mple(bqm, (s1.numpy(), bqm.variables))[0],
-            self.bm.estimate_beta(s1),
+        spins = torch.tensor(
+            [[1, -1, 1, 1], [-1, -1, 1, 1], [1, -1, -1, 1], [1, 1, 1, -1]]
         )
         self.assertEqual(
-            1.0 / mple(bqm, (s2.numpy(), bqm.variables))[0],
-            self.bm.estimate_beta(s2),
-        )
-        self.assertEqual(
-            1.0 / mple(bqm, (s3.numpy(), bqm.variables))[0],
-            self.bm.estimate_beta(s3),
-        )
-
-        fake_spins = torch.randn_like(s3)
-        self.assertEqual(
-            1.0 / mple(bqm, (fake_spins.numpy(), bqm.variables))[0],
-            self.bm.estimate_beta(fake_spins),
+            1.0 / mple(self.bm.bqm, (spins.numpy(), "dbac"))[0],
+            self.bm.estimate_beta(spins),
         )
 
     def test_pad(self):
@@ -135,6 +144,12 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         self.assertAlmostEqual(expected[-1], -torch.tanh(torch.tensor(0.1)).item())
 
     def test_sufficient_statistics(self):
+        # Model for reference:
+        #       a
+        #     / | \
+        #    b--c  d
+        # Edge list for reference:
+        # [["a", "b"], ["a", "c"], ["a", "d"], ["b", "c"]]
         t0 = self.bm.sufficient_statistics(self.ones)
         self.assertListEqual(t0.tolist(), [[1] * 8])
 
@@ -142,29 +157,42 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         self.assertListEqual(t1.tolist(), [[1] * 8, [-1] * 4 + [1] * 4])
 
         t2 = self.bm.sufficient_statistics(self.pmones)
-        self.assertEqual(t2.tolist(), [[1, -1, 1, -1, -1, 1, -1, -1]])
+        # 1 -1 1 -1
+        # d  b a  c
+        self.assertEqual(t2.tolist(), [[1, -1, 1, -1, -1, -1, 1, 1]])
 
     def test_interactions(self):
+        # Model for reference:
+        #       a
+        #     / | \
+        #    b--c  d
+        # Edge list for reference:
+        # [["a", "b"], ["a", "c"], ["a", "d"], ["b", "c"]]
         self.assertListEqual(
+            #                                   d    b    a    c
             self.bm.interactions(torch.tensor([[0.0, 3.0, 2.0, 1.0]])).tolist(),
-            [[0, 0, 0, 6]],
+            [[6.0, 2.0, 0, 3.0]],
         )
         all_ones = [[1, 1, 1, 1]]
         self.assertListEqual(self.bm.interactions(self.ones).tolist(), all_ones)
         self.assertListEqual(self.bm.interactions(self.ones).tolist(), all_ones)
         self.assertListEqual(self.bm.interactions(self.mones).tolist(), all_ones)
-        mpmm = [[-1, 1, -1, -1]]
-        self.assertListEqual(self.bm.interactions(self.pmones).tolist(), mpmm)
-        self.assertListEqual(self.bm.interactions(self.mpones).tolist(), mpmm)
+        # d  b a  c
+        # 1 -1 1 -1
+        mmpp = [[-1.0, -1, 1, 1]]
+        self.assertListEqual(self.bm.interactions(self.pmones).tolist(), mmpp)
+        #  d b  a c
+        # -1 1 -1 1
+        self.assertListEqual(self.bm.interactions(self.mpones).tolist(), mmpp)
 
-    def test_ising(self):
+    def test__ising(self):
         h_true = torch.tensor([-3, 0, 1, 3.0])
         J_true = torch.tensor([-1, 1, 2.0, 0])
 
         self.bm.h.data = h_true
         self.bm.J.data = J_true
 
-        h, J = self.bm.ising(1)
+        h, J = self.bm._ising(1, False)
         h_list = list(h.values())
         J_list = [J[a, b] for a, b in self.edges]
 

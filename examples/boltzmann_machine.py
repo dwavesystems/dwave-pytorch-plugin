@@ -18,14 +18,14 @@ from dwave.system import DWaveSampler
 from dwave_networkx import zephyr_graph, zephyr_coordinates, zephyr_four_color
 from torch.optim import SGD
 
-from dwave.plugins.torch.boltzmann_machine import GraphRestrictedBoltzmannMachine
+from dwave.plugins.torch.boltzmann_machine import GRBM
 
 
 if __name__ == "__main__":
     USE_QPU = True
     NUM_READS = 100
     SAMPLE_SIZE = 17
-    FULLY_VISIBLE = False
+    FULLY_VISIBLE = True
 
     if USE_QPU:
         sampler = DWaveSampler(solver="Advantage2_prototype2.6")
@@ -38,6 +38,8 @@ if __name__ == "__main__":
             # distribution
             auto_scale=False,
         )
+        h_range = sampler.properties["h_range"]
+        j_range = sampler.properties["j_range"]
     else:
         # Use an MCMC sampler that can sample from the equilibrium distribution
         sampler = SimulatedAnnealingSampler()
@@ -48,6 +50,7 @@ if __name__ == "__main__":
             randomize_order=True,
         )
         G = zephyr_graph(6)
+        h_range = j_range = None
 
     if FULLY_VISIBLE:
         hiddens = None
@@ -64,20 +67,21 @@ if __name__ == "__main__":
     x = 1 - 2.0 * torch.randint(0, 2, (SAMPLE_SIZE, n_vis))
 
     # Instantiate the model
-    grbm = GraphRestrictedBoltzmannMachine(G.nodes, G.edges, hiddens)
+    grbm = GRBM(G.nodes, G.edges, hiddens, h_range, j_range)
 
     # Instantiate the optimizer
     opt_grbm = SGD(grbm.parameters())
 
+    measured_beta = 7
     # Example of one iteration in a training loop
     # Generate a sample set from the model
-    s = grbm.sample(sampler, 1 / 6, **sample_kwargs)
+    s = grbm.sample(sampler, 1 / measured_beta, sample_params=sample_kwargs)
+    measured_beta = grbm.estimate_beta(s)
     # Reset the gradients of the model weights
     opt_grbm.zero_grad()
     # Compute the objective---this objective yields the same gradient as the negative
     # log likelihood of the model
-    measured_beta = grbm.estimate_beta(s)
-    objective = grbm.objective(x, s, measured_beta)
+    objective = grbm.objective(x, s)
     # Backpropgate gradients
     objective.backward()
     # Update model weights with a step of stochastic gradient descent

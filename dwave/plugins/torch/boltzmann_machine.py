@@ -52,23 +52,42 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
             listed in the input ``nodes``.
     """
 
-    def __init__(self, nodes: list, edges: list, hiddens: list = None, *args, **kwargs):
+    def __init__(
+        self,
+        nodes: list,
+        edges: list,
+        hiddens: list = None,
+        h_range: tuple[float, float] = None,
+        j_range: tuple[float, float] = None,
+        *args,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
         self.n = len(nodes)
         self.idx_to_var = {i: v for i, v in enumerate(nodes)}
         self.var_to_idx = {v: i for i, v in self.idx_to_var.items()}
+        self.ordered_vars = [self.idx_to_var[i] for i in range(self.n)]
 
         self.m = len(edges)
         edge_idx_i = torch.tensor([self.var_to_idx[i] for i, j in edges])
         edge_idx_j = torch.tensor([self.var_to_idx[j] for i, j in edges])
 
-        self.h = torch.nn.Parameter(0.05 * (2 * torch.randint(0, 2, (self.n,)) - 1))
-        self.J = torch.nn.Parameter(5.0 * (2 * torch.randint(0, 2, (self.m,)) - 1))
+        self.h = torch.nn.Parameter(0.05 * (2 * torch.rand(self.n) - 1))
+        self.J = torch.nn.Parameter(5.0 * (2 * torch.rand(self.m) - 1))
 
         self.register_buffer("edge_idx_i", edge_idx_i)
         self.register_buffer("edge_idx_j", edge_idx_j)
 
+        infs = [-torch.inf, torch.inf]
+        self.register_buffer(
+            "h_range", torch.tensor(h_range if h_range is not None else infs)
+        )
+        self.register_buffer(
+            "j_range", torch.tensor(j_range if j_range is not None else infs)
+        )
+
         self.fully_visible = hiddens is None
+        # TODO check hidden units are conditionally independent
         if not self.fully_visible:
             vidx = torch.tensor([self.var_to_idx[v] for v in nodes if v not in hiddens])
             hidx = torch.tensor([i for i in torch.arange(self.n) if i not in vidx])
@@ -119,6 +138,7 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         self,
         sampler: Sampler,
         prefactor: float,
+        *,
         device: torch.device = None,
         sample_params: dict = None,
     ) -> torch.Tensor:
@@ -150,7 +170,7 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         """
         if sample_params is None:
             sample_params = dict()
-        h, J = self.ising(prefactor)
+        h, J = self._ising(prefactor, clip=True)
         ss = spread(sampler.sample_ising(h, J, **sample_params))
         spins = self.sample_to_tensor(ss, device=device)
         return spins
@@ -170,8 +190,8 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         Returns:
             torch.Tensor: The sample set as a ``torch.Tensor``.
         """
-        v2i_sample = {v: i for i, v in enumerate(sample_set.variables)}
-        permutation = [v2i_sample[self.idx_to_var[i]] for i in range(self.n)]
+        var_to_sample_i = {v: i for i, v in enumerate(sample_set.variables)}
+        permutation = [var_to_sample_i[v] for v in self.ordered_vars]
         sample = sample_set.record.sample[:, permutation]
         return torch.tensor(sample, dtype=torch.float32, device=device)
 
@@ -241,18 +261,31 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         interactions = self.interactions(x)
         return torch.cat([x, interactions], 1)
 
-    def ising(self, prefactor) -> tuple[dict, dict]:
+    def _ising(self, prefactor: float, clip: bool) -> tuple[dict, dict]:
         """Convert the model to Ising format"""
-        linear_bias_list = (prefactor * self.h.detach()).cpu().tolist()
-        linear_biases = {self.idx_to_var[i]: b for i, b in enumerate(linear_bias_list)}
+        h = prefactor * self.h.detach()
+        J = prefactor * self.J.detach()
+        if clip:
+            h = h.clip(*self.h_range)
+            J = J.clip(*self.j_range)
+
         edge_idx_i = self.edge_idx_i.detach().cpu().tolist()
         edge_idx_j = self.edge_idx_j.detach().cpu().tolist()
-        quadratic_bias_list = (prefactor * self.J.detach()).cpu().tolist()
-        quadratic_biases = {
+        h = {self.idx_to_var[i]: b for i, b in enumerate(h.cpu().tolist())}
+        J = {
             (self.idx_to_var[a], self.idx_to_var[b]): w
-            for a, b, w in zip(edge_idx_i, edge_idx_j, quadratic_bias_list)
+            for a, b, w in zip(edge_idx_i, edge_idx_j, J)
         }
-        return linear_biases, quadratic_biases
+        return h, J
+
+    @property
+    def ising(self):
+        return self._ising(1, False)
+
+    @property
+    def bqm(self):
+        bqm = BinaryQuadraticModel.from_ising(*self.ising)
+        return bqm
 
     def _pad(self, x: torch.Tensor) -> torch.Tensor:
         """Pads the observed spins with ``torch.nan``s at ``self.hidx`` to mark them as
@@ -278,17 +311,17 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
 
     def estimate_beta(self, spins: torch.Tensor) -> float:
         """Estimate the maximum pseudolikelihood temperature using
-        ``dwave.system.temperatures``.
+        ``dwave.system.temperatures.maximum_pseudolikelihood_temperature``.
 
         Args:
             spins (torch.Tensor): A tensor of shape (b, N) where b is the sample size,
                 and N denotes the number of variables in the model.
 
         Returns:
-            float: The estimated effective inverse temperature of the model.
+            float: The estimated inverse temperature of the model.
         """
-        bqm = self.bqm(1)
-        beta = 1 / mple(bqm, (spins.detach().cpu().numpy(), bqm.variables))[0]
+        bqm = self.bqm
+        beta = 1 / mple(bqm, (spins.detach().cpu().numpy(), self.ordered_vars))[0]
         return beta
 
     def _compute_effective_field(self, padded: torch.Tensor) -> torch.Tensor:
@@ -338,10 +371,6 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         h_eff = self._compute_effective_field(m)
         m[:, self.hidx] = -torch.tanh(h_eff)
         return m
-
-    def bqm(self, prefactor):
-        bqm = BinaryQuadraticModel.from_ising(*self.ising(prefactor))
-        return bqm
 
 
 GRBM = GraphRestrictedBoltzmannMachine
