@@ -13,13 +13,13 @@
 # limitations under the License.
 
 import unittest
+from math import isclose
 
 import torch
-
-from dimod import SampleSet, SPIN, IdentitySampler
-from dwave.system.temperatures import maximum_pseudolikelihood_temperature as mple
+from dimod import SPIN, IdentitySampler, SampleSet
 
 from dwave.plugins.torch.boltzmann_machine import GRBM
+from dwave.system.temperatures import maximum_pseudolikelihood_temperature as mple
 
 
 class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
@@ -57,6 +57,7 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         self.assertListEqual(
             [self.bm.idx_to_var[i] for i in range(self.bm.n)], self.bm.ordered_vars
         )
+        self.assertRaises(NotImplementedError, GRBM, [0, 1, 2], [[0, 1]], [0, 1])
 
     def test_forward(self):
         # Model for reference:
@@ -94,6 +95,8 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
             en_bqm = bqm.energies((fake_spins.numpy(), "dbac")).item()
             en_boltz = self.bm(fake_spins).item()
             self.assertAlmostEqual(en_bqm, en_boltz, 4)
+
+
 
     def test_estimate_beta(self):
         spins = torch.tensor(
@@ -188,16 +191,27 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
     def test__ising(self):
         h_true = torch.tensor([-3, 0, 1, 3.0])
         J_true = torch.tensor([-1, 1, 2.0, 0])
-
         self.bm.h.data = h_true
         self.bm.J.data = J_true
 
-        h, J = self.bm._ising(1, False)
-        h_list = list(h.values())
-        J_list = [J[a, b] for a, b in self.edges]
+        with self.subTest("Ising dictionaries without unbounded bias ranges"):
+            h, J = self.bm._ising(1)
+            h_list = list(h.values())
+            J_list = [J[a, b] for a, b in self.edges]
 
-        self.assertListEqual(h_list, h_true.tolist())
-        self.assertListEqual(J_list, J_true.tolist())
+            self.assertListEqual(h_list, h_true.tolist())
+            self.assertListEqual(J_list, J_true.tolist())
+
+        with self.subTest("Ising dictionaries with bounded bias ranges"):
+            h, J = self.bm._ising(1, [-0.1, 1.5], [-0.05, 3])
+            h_list = list(h.values())
+            J_list =[J[a, b] for a, b in self.edges]
+
+            for x_true, x_observed in zip([-0.1, 0, 1, 1.5], h_list):
+                self.assertAlmostEqual(x_true, x_observed)
+            for x_true, x_observed in zip([-0.05, 1, 2, 0], J_list):
+                self.assertAlmostEqual(x_true, x_observed)
+
 
     def test_sample_to_tensor(self):
         grbm = GRBM(list("cabd"), ["ab", "ac", "bc"])
@@ -217,6 +231,7 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         spins = grbm.sample(
             IdentitySampler(),
             prefactor=1,
+            h_range=None, j_range=None,
             sample_params=dict(
                 initial_states=([[1, 1, 1, 1], [1, 1, 1, 1], [-1, -1, 1, -1]], "abcd")
             ),

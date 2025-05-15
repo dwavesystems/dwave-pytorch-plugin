@@ -34,8 +34,9 @@ if TYPE_CHECKING:
     from dimod import Sampler
 
 from dimod import BinaryQuadraticModel, SampleSet
-from dwave.system.temperatures import maximum_pseudolikelihood_temperature as mple
 from hybrid.composers import AggregatedSamples
+
+from dwave.system.temperatures import maximum_pseudolikelihood_temperature as mple
 
 spread = AggregatedSamples.spread
 
@@ -52,17 +53,8 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
             listed in the input ``nodes``.
     """
 
-    def __init__(
-        self,
-        nodes: list,
-        edges: list,
-        hiddens: list = None,
-        h_range: tuple[float, float] = None,
-        j_range: tuple[float, float] = None,
-        *args,
-        **kwargs,
-    ):
-        super().__init__(*args, **kwargs)
+    def __init__(self, nodes: list, edges: list, hiddens: list = None):
+        super().__init__()
         self.n = len(nodes)
         self.idx_to_var = {i: v for i, v in enumerate(nodes)}
         self.var_to_idx = {v: i for i, v in self.idx_to_var.items()}
@@ -78,17 +70,14 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         self.register_buffer("edge_idx_i", edge_idx_i)
         self.register_buffer("edge_idx_j", edge_idx_j)
 
-        infs = [-torch.inf, torch.inf]
-        self.register_buffer(
-            "h_range", torch.tensor(h_range if h_range is not None else infs)
-        )
-        self.register_buffer(
-            "j_range", torch.tensor(j_range if j_range is not None else infs)
-        )
-
         self.fully_visible = hiddens is None
-        # TODO check hidden units are conditionally independent
         if not self.fully_visible:
+            connected_hidden = any(a in hiddens and b in hiddens for a, b in edges)
+            if connected_hidden:
+                err_message = """Current implementation does not support intrahidden-unit
+                connections. Please submit a feature request on GitHub."""
+                raise NotImplementedError(err_message)
+
             vidx = torch.tensor([self.var_to_idx[v] for v in nodes if v not in hiddens])
             hidx = torch.tensor([i for i in torch.arange(self.n) if i not in vidx])
             self.register_buffer("vidx", vidx)
@@ -138,6 +127,8 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         self,
         sampler: Sampler,
         prefactor: float,
+        h_range: tuple[float, float] = None,
+        j_range: tuple[float, float] = None,
         *,
         device: torch.device = None,
         sample_params: dict = None,
@@ -170,7 +161,7 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         """
         if sample_params is None:
             sample_params = dict()
-        h, J = self._ising(prefactor, clip=True)
+        h, J = self._ising(prefactor, h_range, j_range)
         ss = spread(sampler.sample_ising(h, J, **sample_params))
         spins = self.sample_to_tensor(ss, device=device)
         return spins
@@ -261,13 +252,14 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         interactions = self.interactions(x)
         return torch.cat([x, interactions], 1)
 
-    def _ising(self, prefactor: float, clip: bool) -> tuple[dict, dict]:
+    def _ising(self, prefactor: float, h_range: tuple[float, float]=None, j_range: tuple[float, float]=None) -> tuple[dict, dict]:
         """Convert the model to Ising format"""
         h = prefactor * self.h.detach()
         J = prefactor * self.J.detach()
-        if clip:
-            h = h.clip(*self.h_range)
-            J = J.clip(*self.j_range)
+        if h_range is not None:
+            h = h.clip(*h_range)
+        if j_range is not None:
+            J = J.clip(*j_range)
 
         edge_idx_i = self.edge_idx_i.detach().cpu().tolist()
         edge_idx_j = self.edge_idx_j.detach().cpu().tolist()
@@ -280,7 +272,7 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
 
     @property
     def ising(self):
-        return self._ising(1, False)
+        return self._ising(1)
 
     @property
     def bqm(self):

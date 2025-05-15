@@ -12,19 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import torch
-
-from dwave.samplers import SimulatedAnnealingSampler
-from dwave.system import DWaveSampler
-from dwave_networkx import zephyr_graph, zephyr_coordinates, zephyr_four_color
+from dwave_networkx import zephyr_coordinates, zephyr_four_color, zephyr_graph
 from torch.optim import SGD
 
 from dwave.plugins.torch.boltzmann_machine import GRBM
-
+from dwave.samplers import SimulatedAnnealingSampler
+from dwave.system import DWaveSampler
 
 if __name__ == "__main__":
     USE_QPU = True
     NUM_READS = 100
-    SAMPLE_SIZE = 17
+    BATCH_SIZE = 17
+    N_ITERATIONS = 10
     FULLY_VISIBLE = True
 
     if USE_QPU:
@@ -64,7 +63,7 @@ if __name__ == "__main__":
 
     # Generate fake data to fit the Boltzmann machine to
     # Make sure ``x`` is of type float
-    x = 1 - 2.0 * torch.randint(0, 2, (SAMPLE_SIZE, n_vis))
+    X = 1 - 2.0 * torch.randint(0, 2, (N_ITERATIONS, BATCH_SIZE, n_vis))
 
     # Instantiate the model
     grbm = GRBM(G.nodes, G.edges, hiddens, h_range, j_range)
@@ -72,17 +71,20 @@ if __name__ == "__main__":
     # Instantiate the optimizer
     opt_grbm = SGD(grbm.parameters())
 
-    measured_beta = 7
     # Example of one iteration in a training loop
     # Generate a sample set from the model
-    s = grbm.sample(sampler, 1 / measured_beta, sample_params=sample_kwargs)
-    measured_beta = grbm.estimate_beta(s)
-    # Reset the gradients of the model weights
-    opt_grbm.zero_grad()
-    # Compute the objective---this objective yields the same gradient as the negative
-    # log likelihood of the model
-    objective = grbm.objective(x, s)
-    # Backpropgate gradients
-    objective.backward()
-    # Update model weights with a step of stochastic gradient descent
-    opt_grbm.step()
+    for iteration, x in zip(range(N_ITERATIONS), X):
+        s = grbm.sample(sampler, 1 / 6.6, sample_params=sample_kwargs)
+        measured_beta = grbm.estimate_beta(s)
+        # Reset the gradients of the model weights
+        opt_grbm.zero_grad()
+        # Compute the objective---this objective yields the same gradient as the negative
+        # log likelihood of the model
+        objective = grbm.objective(x, s)
+        # Backpropgate gradients
+        objective.backward()
+        # Update model weights with a step of stochastic gradient descent
+        opt_grbm.step()
+        print(
+            f"iteration: {iteration}, obj: {objective.item():.2f}, beta: {measured_beta:.4f}"
+        )
