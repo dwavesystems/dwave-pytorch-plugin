@@ -51,8 +51,8 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
     Args:
         nodes (Iterable[Hashable]): List of nodes.
         edges (Iterable[tuple[Hashable, Hashable]]): List of edges.
-        hidden_nodes (Iterable[Hashable], optional): List of hidden nodes. Each hidden node should also be
-            listed in the input ``nodes``.
+        hidden_nodes (Iterable[Hashable], optional): List of hidden nodes. Each hidden node should
+            also be listed in the input ``nodes``.
     """
 
     def __init__(self, nodes: Iterable[Hashable],
@@ -77,7 +77,67 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         self.register_buffer("_edge_idx_i", edge_idx_i)
         self.register_buffer("_edge_idx_j", edge_idx_j)
 
-        self._setup_hidden(nodes, edges, hidden_nodes)
+
+        self._fully_visible = hidden_nodes is None
+        if self._fully_visible:
+            hidden_nodes = list()
+        else:
+            hidden_nodes = list(hidden_nodes)
+        self._hidden_nodes = hidden_nodes
+
+        # NOTE: `_setup_hidden` must be invoked as the last step as it depends on properties defined
+        #    above
+        self._setup_hidden()
+
+    def _setup_hidden(self):
+        """Preprocess some indexes to enable vectorized computation of effective fields of hidden
+        units."""
+        connected_hidden = any(
+            a in self.hidden_nodes and b in self.hidden_nodes for a, b in self.edges)
+        if connected_hidden:
+            err_message = """Current implementation does not support intrahidden-unit
+            connections. Please submit a feature request on GitHub."""
+            raise NotImplementedError(err_message)
+
+        visible_idx = torch.tensor([self._node_to_idx[v]
+                                    for v in self.nodes if v not in self.hidden_nodes])
+        hidden_idx = torch.tensor(
+            [i for i in torch.arange(self._n_nodes) if i not in visible_idx])
+        self.register_buffer("_visible_idx", visible_idx)
+        self.register_buffer("_hidden_idx", hidden_idx)
+
+        # If hidden units are present, we need to keep track of several sets of
+        # indices in order to vectorize computations. These indices will be used in
+        # the :meth:`GraphRestrictedBoltzmannMachine._compute_effective_field` and
+        # details are described there.
+        flat_adj = list()
+        bin_idx = list()
+        bin_pointer = -1
+        quadratic_idx = torch.arange(self._n_edges)
+        flat_j_idx = list()
+        for idx in self.hidden_idx.tolist():
+            mask_i = self._edge_idx_i == idx
+            mask_j = self._edge_idx_j == idx
+            edges = torch.cat([self.edge_idx_j[mask_i], self._edge_idx_i[mask_j]])
+            flat_j_idx.extend(quadratic_idx[mask_i + mask_j].tolist())
+            bin_pointer += edges.shape[0]
+            bin_idx.append(bin_pointer)
+            flat_adj.extend(edges.tolist())
+        # ``self.flat_adj`` is a flattened adjacency list. It is flattened because
+        # it would otherwise be a ragged tensor.
+        self.register_buffer("_flat_adj", torch.tensor(flat_adj))
+        # ``self.jidx`` is used to track the corresponding edge weights of the
+        # flattened adjacency.
+        self.register_buffer("_flat_j_idx", torch.tensor(flat_j_idx))
+        # Because the adjacency list has been flattened, we need to track the
+        # bin indices for each hidden unit.
+        self.register_buffer("_bin_idx", torch.tensor(bin_idx))
+        # Visually, this is the data structure we want to track.
+        # [0 1 4 5 | 0 | 0 | 1 3 4 | ... ]
+        # The bin indices denoted by pipes |.
+        # Each bin corresponds to edges of a single hidden unit.
+        # For example, the sequence 0 1 4 5 corresponds to the adjacency of the
+        # first hidden unit.
 
     @property
     def linear(self):
@@ -93,6 +153,10 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
     def nodes(self):
         """List of nodes in the model."""
         return self._nodes
+
+    @property
+    def hidden_nodes(self):
+        return self._hidden_nodes
 
     @property
     def edges(self):
@@ -161,65 +225,6 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         tensor. The linear and quadratic biases are concatenated in the order as defined
         by the model's input ``nodes`` and ``edges``."""
         return torch.cat([self._linear, self._quadratic])
-
-    def _setup_hidden(self, nodes: Iterable[Hashable], edges: Iterable[tuple[Hashable, Hashable]],
-                      hidden_nodes: Iterable[Hashable] = None):
-        """Preprocess some indexes to enable vectorized computation of effective fields of hidden units.
-
-        Args:
-            nodes (Iterable[Hashable]): Nodes of the model.
-            edges (Iterable[tuple[Hashable, Hashable]]): Edges of the model.
-            hidden_nodes (Iterable[Hashable], optional): Hidden nodes of the model. Each hidden node
-                should also be in ``nodes``.
-        """
-        self._fully_visible = hidden_nodes is None
-        if not self._fully_visible:
-            hidden_nodes = list(hidden_nodes)
-            connected_hidden = any(a in hidden_nodes and b in hidden_nodes for a, b in edges)
-            if connected_hidden:
-                err_message = """Current implementation does not support intrahidden-unit
-                connections. Please submit a feature request on GitHub."""
-                raise NotImplementedError(err_message)
-
-            visible_idx = torch.tensor([self._node_to_idx[v]
-                                       for v in nodes if v not in hidden_nodes])
-            hidden_idx = torch.tensor(
-                [i for i in torch.arange(self._n_nodes) if i not in visible_idx])
-            self.register_buffer("_visible_idx", visible_idx)
-            self.register_buffer("_hidden_idx", hidden_idx)
-
-            # If hidden units are present, we need to keep track of several sets of
-            # indices in order to vectorize computations. These indices will be used in
-            # the :meth:`GraphRestrictedBoltzmannMachine._compute_effective_field` and
-            # details are described there.
-            flat_adj = list()
-            bin_idx = list()
-            bin_pointer = -1
-            quadratic_idx = torch.arange(self._n_edges)
-            flat_j_idx = list()
-            for idx in self.hidden_idx.tolist():
-                mask_i = self._edge_idx_i == idx
-                mask_j = self._edge_idx_j == idx
-                edges = torch.cat([self.edge_idx_j[mask_i], self._edge_idx_i[mask_j]])
-                flat_j_idx.extend(quadratic_idx[mask_i + mask_j].tolist())
-                bin_pointer += edges.shape[0]
-                bin_idx.append(bin_pointer)
-                flat_adj.extend(edges.tolist())
-            # ``self.flat_adj`` is a flattened adjacency list. It is flattened because
-            # it would otherwise be a ragged tensor.
-            self.register_buffer("_flat_adj", torch.tensor(flat_adj))
-            # ``self.jidx`` is used to track the corresponding edge weights of the
-            # flattened adjacency.
-            self.register_buffer("_flat_j_idx", torch.tensor(flat_j_idx))
-            # Because the adjacency list has been flattened, we need to track the
-            # bin indices for each hidden unit.
-            self.register_buffer("_bin_idx", torch.tensor(bin_idx))
-            # Visually, this is the data structure we want to track.
-            # [0 1 4 5 | 0 | 0 | 1 3 4 | ... ]
-            # The bin indices denoted by pipes |.
-            # Each bin corresponds to edges of a single hidden unit.
-            # For example, the sequence 0 1 4 5 corresponds to the adjacency of the
-            # first hidden unit.
 
     def sample(
         self,
@@ -349,12 +354,20 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
 
     def to_ising(self, prefactor: float, h_range: tuple[float, float] = None,
                  j_range: tuple[float, float] = None) -> tuple[dict, dict]:
-        """Convert the model to Ising format with scaling (``prefactor``) followed by clipping (if ``h_range`` and/or ``j_range`` are supplied).
+        """Convert the model to Ising format with scaling (``prefactor``) followed by clipping (if
+        ``h_range`` and/or ``j_range`` are supplied).
 
         Args:
-            prefactor (float): A scaling term applied to the linear and quadratic biases prior to, if applicable, clipping.
-            h_range (tuple[float, float], Optional): The minimum and maximum values to clip linear biases with.
-            j_range (tuple[float, float], Optional): The minimum and maximum values to clip quadratic biases with.
+            prefactor (float): A scaling term applied to the linear and quadratic biases prior to,
+                if applicable, clipping.
+            h_range (tuple[float, float], Optional): The minimum and maximum values to clip linear
+                biases with.
+            j_range (tuple[float, float], Optional): The minimum and maximum values to clip
+                quadratic biases with.
+
+        Returns:
+            tuple[dict, dict]: The linear and quadratic biases in dictionary format compatible with
+                `dimod.Sampler.sample_ising`.
         """
         h = prefactor * self._linear.detach()
         J = prefactor * self._quadratic.detach()
