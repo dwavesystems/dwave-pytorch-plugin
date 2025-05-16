@@ -65,13 +65,14 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         self._idx_to_node = {i: v for i, v in enumerate(nodes)}
         self._node_to_idx = {v: i for i, v in self._idx_to_node.items()}
         self._nodes = list(nodes)
+        self._edges = list(edges)
 
-        self._edges = len(edges)
+        self._n_edges = len(edges)
         edge_idx_i = torch.tensor([self._node_to_idx[i] for i, j in edges])
         edge_idx_j = torch.tensor([self._node_to_idx[j] for i, j in edges])
 
         self._linear = torch.nn.Parameter(0.05 * (2 * torch.rand(self._n_nodes) - 1))
-        self._quadratic = torch.nn.Parameter(5.0 * (2 * torch.rand(self._edges) - 1))
+        self._quadratic = torch.nn.Parameter(5.0 * (2 * torch.rand(self._n_edges) - 1))
 
         self.register_buffer("_edge_idx_i", edge_idx_i)
         self.register_buffer("_edge_idx_j", edge_idx_j)
@@ -92,6 +93,11 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
     def nodes(self):
         """List of nodes in the model."""
         return self._nodes
+
+    @property
+    def edges(self):
+        """List of nodes in the model."""
+        return self._edges
 
     @property
     def node_to_idx(self):
@@ -189,7 +195,7 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
             flat_adj = list()
             bin_idx = list()
             bin_pointer = -1
-            quadratic_idx = torch.arange(self._edges)
+            quadratic_idx = torch.arange(self._n_edges)
             flat_j_idx = list()
             for idx in self.hidden_idx.tolist():
                 mask_i = self._edge_idx_i == idx
