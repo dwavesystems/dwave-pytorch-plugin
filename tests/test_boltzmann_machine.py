@@ -13,12 +13,11 @@
 # limitations under the License.
 
 import unittest
-from math import isclose
 
 import torch
-from dimod import SPIN, IdentitySampler, SampleSet
+from dimod import SPIN, BinaryQuadraticModel, IdentitySampler, SampleSet
 
-from dwave.plugins.torch.boltzmann_machine import GRBM
+from dwave.plugins.torch.boltzmann_machine import GraphRestrictedBoltzmannMachine as GRBM
 from dwave.system.temperatures import maximum_pseudolikelihood_temperature as mple
 
 
@@ -38,8 +37,8 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         h = [0.0, 1, 2, 3]
 
         bm = GRBM(self.nodes, self.edges)
-        bm.h.data = torch.tensor(h, dtype=dtype)
-        bm.J.data = torch.tensor([1, 2, 3, 6], dtype=dtype)
+        bm._linear.data = torch.tensor(h, dtype=dtype)
+        bm._quadratic.data = torch.tensor([1, 2, 3, 6], dtype=dtype)
 
         self.bm = bm
 
@@ -53,9 +52,9 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         return super().setUp()
 
     def test_constructor(self):
-        self.assertListEqual(list("dbac"), self.bm.ordered_vars)
+        self.assertListEqual(list("dbac"), self.bm._nodes)
         self.assertListEqual(
-            [self.bm.idx_to_var[i] for i in range(self.bm.n)], self.bm.ordered_vars
+            [self.bm._idx_to_var[i] for i in range(self.bm._n_nodes)], self.bm._nodes
         )
         self.assertRaises(NotImplementedError, GRBM, [0, 1, 2], [[0, 1]], [0, 1])
 
@@ -84,11 +83,11 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         with self.subTest(
             "Arbitrary-valued weights and spins should match dimod.BQM energy"
         ):
-            self.bm.h.data = torch.linspace(-412, 23, 4)
+            self.bm._linear.data = torch.linspace(-412, 23, 4)
             new_J = torch.linspace(-0.4, 4, 4**2)
-            self.bm.J.data = new_J[: len(self.bm.J)]
+            self.bm._quadratic.data = new_J[: len(self.bm._quadratic)]
 
-            bqm = self.bm.bqm
+            bqm = BinaryQuadraticModel.from_ising(*self.bm.to_ising(1))
 
             fake_spins = 1.0 * torch.arange(1, 5).unsqueeze(0)
 
@@ -96,14 +95,13 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
             en_boltz = self.bm(fake_spins).item()
             self.assertAlmostEqual(en_bqm, en_boltz, 4)
 
-
-
     def test_estimate_beta(self):
         spins = torch.tensor(
             [[1, -1, 1, 1], [-1, -1, 1, 1], [1, -1, -1, 1], [1, 1, 1, -1]]
         )
+        bqm = BinaryQuadraticModel.from_ising(*self.bm.to_ising(1))
         self.assertEqual(
-            1.0 / mple(self.bm.bqm, (spins.numpy(), "dbac"))[0],
+            1.0 / mple(bqm, (spins.numpy(), "dbac"))[0],
             self.bm.estimate_beta(spins),
         )
 
@@ -123,8 +121,8 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         #           \ 1 /
         # effective field = quadratic(0,1) + quadratic(0,2) + linear(2)
         #                 = -0.13 - 0.17 + 0.4 = 0.1
-        grbm.h.data = torch.tensor([-0.1, -0.2, 0.4])
-        grbm.J.data = torch.tensor([-0.7, 0.13, -0.17])
+        grbm._linear.data = torch.tensor([-0.1, -0.2, 0.4])
+        grbm._quadratic.data = torch.tensor([-0.7, 0.13, -0.17])
         padded = torch.tensor([[-1.0, 1.0, float("nan")]])
         h_eff = grbm._compute_effective_field(padded)
         self.assertAlmostEqual(h_eff.item(), 0.1)
@@ -136,8 +134,8 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         #         \      |
         #  (-0.17) \     |  (-0.7)
         #           \ 1 /
-        grbm.h.data = torch.tensor([-0.1, -0.2, 0.4])
-        grbm.J.data = torch.tensor([-0.7, 0.13, -0.17])
+        grbm._linear.data = torch.tensor([-0.1, -0.2, 0.4])
+        grbm._quadratic.data = torch.tensor([-0.7, 0.13, -0.17])
         obs = torch.tensor([[-1.0, 1.0]])
         expected = grbm._compute_expectation_disconnected(obs)[0].tolist()
         self.assertListEqual(expected[:2], [-1, 1])
@@ -188,14 +186,14 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         # -1 1 -1 1
         self.assertListEqual(self.bm.interactions(self.mpones).tolist(), mmpp)
 
-    def test__ising(self):
+    def test_to_ising(self):
         h_true = torch.tensor([-3, 0, 1, 3.0])
         J_true = torch.tensor([-1, 1, 2.0, 0])
-        self.bm.h.data = h_true
-        self.bm.J.data = J_true
+        self.bm._linear.data = h_true
+        self.bm._quadratic.data = J_true
 
         with self.subTest("Ising dictionaries without unbounded bias ranges"):
-            h, J = self.bm._ising(1)
+            h, J = self.bm.to_ising(1)
             h_list = list(h.values())
             J_list = [J[a, b] for a, b in self.edges]
 
@@ -203,22 +201,21 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
             self.assertListEqual(J_list, J_true.tolist())
 
         with self.subTest("Ising dictionaries with bounded bias ranges"):
-            h, J = self.bm._ising(1, [-0.1, 1.5], [-0.05, 3])
+            h, J = self.bm.to_ising(1, [-0.1, 1.5], [-0.05, 3])
             h_list = list(h.values())
-            J_list =[J[a, b] for a, b in self.edges]
+            J_list = [J[a, b] for a, b in self.edges]
 
             for x_true, x_observed in zip([-0.1, 0, 1, 1.5], h_list):
                 self.assertAlmostEqual(x_true, x_observed)
             for x_true, x_observed in zip([-0.05, 1, 2, 0], J_list):
                 self.assertAlmostEqual(x_true, x_observed)
 
-
-    def test_sample_to_tensor(self):
+    def test_sampleset_to_tensor(self):
         grbm = GRBM(list("cabd"), ["ab", "ac", "bc"])
         bogus_energy = [999] * 3
         spins_in = [[1, -1, 1, 1], [1, 1, 1, 1], [1, 1, 1, 1]]
         ss = SampleSet.from_samples((spins_in, list("dbca")), SPIN, bogus_energy)
-        spins = grbm.sample_to_tensor(ss)
+        spins = grbm.sampleset_to_tensor(ss)
         self.assertTupleEqual((3, 4), tuple(spins.shape))
         self.assertIsInstance(spins, torch.Tensor)
         # Test variable ordering is respected
@@ -250,8 +247,8 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         h = [0.0, 1, 2, 3]
 
         grbm = GRBM(self.nodes, self.edges)
-        grbm.h.data = torch.tensor(h, dtype=dtype)
-        grbm.J.data = torch.tensor([1, 2, 3, 6], dtype=dtype)
+        grbm._linear.data = torch.tensor(h, dtype=dtype)
+        grbm._quadratic.data = torch.tensor([1, 2, 3, 6], dtype=dtype)
 
         # Test the gradient matches
         ones = torch.ones((1, 4))
@@ -261,7 +258,7 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
             obj.backward()
             t1 = grbm.sufficient_statistics(ones)
             t2 = grbm.sufficient_statistics(mones)
-            grad_auto = grbm.h.grad.tolist() + grbm.J.grad.tolist()
+            grad_auto = grbm._linear.grad.tolist() + grbm._quadratic.grad.tolist()
             self.assertListEqual(grad_auto, (t1.mean(0) - t2.mean(0)).tolist())
 
         pmones = torch.tensor([[1, -1, 1, -1]], dtype=dtype)
