@@ -62,13 +62,13 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         nodes = list(nodes)
         edges = list(edges)
         self._n_nodes = len(nodes)
-        self._idx_to_var = {i: v for i, v in enumerate(nodes)}
-        self._var_to_idx = {v: i for i, v in self._idx_to_var.items()}
+        self._idx_to_node = {i: v for i, v in enumerate(nodes)}
+        self._node_to_idx = {v: i for i, v in self._idx_to_node.items()}
         self._nodes = list(nodes)
 
         self._edges = len(edges)
-        edge_idx_i = torch.tensor([self._var_to_idx[i] for i, j in edges])
-        edge_idx_j = torch.tensor([self._var_to_idx[j] for i, j in edges])
+        edge_idx_i = torch.tensor([self._node_to_idx[i] for i, j in edges])
+        edge_idx_j = torch.tensor([self._node_to_idx[j] for i, j in edges])
 
         self._linear = torch.nn.Parameter(0.05 * (2 * torch.rand(self._n_nodes) - 1))
         self._quadratic = torch.nn.Parameter(5.0 * (2 * torch.rand(self._edges) - 1))
@@ -80,54 +80,73 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
 
     @property
     def linear(self):
+        """The linear biases of the model."""
         return self._linear
 
     @property
     def quadratic(self):
+        """The quadratic biases of the model."""
         return self._quadratic
 
     @property
     def nodes(self):
+        """List of nodes in the model."""
         return self._nodes
 
     @property
-    def var_to_idx(self):
-        return self._var_to_idx
+    def node_to_idx(self):
+        """A dictionary mapping from node to index of model variables."""
+        return self._node_to_idx
 
     @property
-    def idx_to_var(self):
-        return self._idx_to_var
+    def idx_to_node(self):
+        """A dictionary mapping from index of model variables to nodes."""
+        return self._idx_to_node
 
     @property
     def n_nodes(self):
+        """Total number of model variables or graph nodes (including hidden units)."""
         return self._n_nodes
 
     @property
     def n_edges(self):
+        """Total number of edges in the model or graph."""
         return self._n_edges
 
     @property
     def visible_idx(self):
+        """A ``torch.Tensor`` of model variable indices corresponding to visible units."""
         return self._visible_idx
 
     @property
     def hidden_idx(self):
+        """A ``torch.Tensor`` of model variable indices corresponding to hidden units."""
         return self._hidden_idx
 
     @property
     def fully_visible(self):
+        """A flag indicating whether the model is fully visible. This is the negation of
+        :attr:`~has_hidden` and exists for readability of code in contexts where it is more natural
+        to read "fully visible" instead of "has hidden"."""
         return self._fully_visible
 
     @property
     def has_hidden(self):
+        """A flag indicating whether the model contains hidden units. This is the negation of
+        :attr:`~fully_visible` and exists for readability of code in contexts where it is more
+        natural to read "has hidden" instead of "fully visible"."""
         return not self.fully_visible
 
     @property
     def edge_idx_i(self):
+        """A ``torch.Tensor`` of model variable indices corresponding to one endpoints of edges.
+        The other endpoint of edges is stored in :attr:`~edge_idx_j`."""
         return self._edge_idx_i
 
     @property
     def edge_idx_j(self):
+        """A ``torch.Tensor`` of model variable indices corresponding to one endpoints of edges.
+        The other endpoint of edges is stored in :attr:`~edge_idx_i`."""
         return self._edge_idx_j
 
     @property
@@ -156,7 +175,7 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
                 connections. Please submit a feature request on GitHub."""
                 raise NotImplementedError(err_message)
 
-            visible_idx = torch.tensor([self._var_to_idx[v]
+            visible_idx = torch.tensor([self._node_to_idx[v]
                                        for v in nodes if v not in hidden_nodes])
             hidden_idx = torch.tensor(
                 [i for i in torch.arange(self._n_nodes) if i not in visible_idx])
@@ -340,9 +359,9 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
 
         edge_idx_i = self.edge_idx_i.detach().cpu().tolist()
         edge_idx_j = self.edge_idx_j.detach().cpu().tolist()
-        h = {self._idx_to_var[i]: b for i, b in enumerate(h.cpu().tolist())}
+        h = {self._idx_to_node[i]: b for i, b in enumerate(h.cpu().tolist())}
         J = {
-            (self._idx_to_var[a], self._idx_to_var[b]): w
+            (self._idx_to_node[a], self._idx_to_node[b]): w
             for a, b, w in zip(edge_idx_i, edge_idx_j, J)
         }
         return h, J

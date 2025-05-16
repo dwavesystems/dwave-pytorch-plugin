@@ -54,7 +54,7 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
     def test_constructor(self):
         self.assertListEqual(list("dbac"), self.bm._nodes)
         self.assertListEqual(
-            [self.bm._idx_to_var[i] for i in range(self.bm._n_nodes)], self.bm._nodes
+            [self.bm._idx_to_node[i] for i in range(self.bm._n_nodes)], self.bm._nodes
         )
         self.assertRaises(NotImplementedError, GRBM, [0, 1, 2], [[0, 1]], [0, 1])
 

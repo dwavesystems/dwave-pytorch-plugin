@@ -19,19 +19,24 @@ from dwave.plugins.torch.boltzmann_machine import GraphRestrictedBoltzmannMachin
 from dwave.samplers import SimulatedAnnealingSampler
 from dwave.system import DWaveSampler
 
-if __name__ == "__main__":
-    USE_QPU = False
-    NUM_READS = 100
-    BATCH_SIZE = 100
-    N_ITERATIONS = 10
-    FULLY_VISIBLE = True
 
-    if USE_QPU:
+def run(use_qpu: bool, num_reads: int, batch_size: int, n_iterations: int, fully_visible: bool):
+    """Run an example of fitting the a graph-restricted Boltzmann machine to synthetic data generated
+    uniformly randomly.
+
+    Args:
+        use_qpu (bool): Flag indicating whether to sample with a QPU or a classical sampler.
+        num_reads (int): Sample size of spins sampled from the model.
+        batch_size (int): Batch size of data.
+        n_iterations (int): Number of training iterations.
+        fully_visible (bool): Flag indicating whether the model should be fully visible.
+    """
+    if use_qpu:
         sampler = DWaveSampler(solver="Advantage2_prototype2.6")
         zephyr_grid_size = sampler.properties['topology']['shape'][0]
         G = sampler.to_networkx_graph()
         sample_kwargs = dict(
-            num_reads=NUM_READS,
+            num_reads=num_reads,
             # Set `answer_mode` to "raw" so no samples are aggregated
             answer_mode="raw",
             # Set `auto_scale`` to `False` so the sampler sample from the intended
@@ -48,7 +53,7 @@ if __name__ == "__main__":
         sampler = SimulatedAnnealingSampler()
         # Parameters chosen to reflect a valid MCMC sampler (despite the name "simulated annealing")
         sample_kwargs = dict(
-            num_reads=NUM_READS,
+            num_reads=num_reads,
             beta_range=[1, 1],
             proposal_acceptance_criterion="Gibbs",
             randomize_order=True,
@@ -60,7 +65,7 @@ if __name__ == "__main__":
         # inverse temperature or annealing parameter (one), so no scaling is required (one).
         prefactor = 1.0
 
-    if FULLY_VISIBLE:
+    if fully_visible:
         hidden_nodes = None
         n_vis = G.number_of_nodes()
     else:
@@ -74,7 +79,7 @@ if __name__ == "__main__":
 
     # Generate fake data to fit the Boltzmann machine to
     # Make sure ``x`` is of type float
-    X = 1 - 2.0 * torch.randint(0, 2, (N_ITERATIONS, BATCH_SIZE, n_vis))
+    X = 1 - 2.0 * torch.randint(0, 2, (n_iterations, batch_size, n_vis))
 
     # Instantiate the model
     grbm = GRBM(list(G.nodes), list(G.edges), hidden_nodes)
@@ -110,3 +115,7 @@ if __name__ == "__main__":
         print(
             f"Iteration: {iteration}, Average |gradient|: {avg_grad.item():.2f}, Effective inverse temperature: {measured_beta:.4f}"
         )
+
+
+if __name__ == "__main__":
+    run(False, 100, 100, 10, True)
