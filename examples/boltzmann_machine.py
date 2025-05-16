@@ -108,5 +108,5 @@ if __name__ == "__main__":
         avg_grad = (grbm._linear.grad.abs().mean() + grbm._quadratic.grad.abs().mean())/2
 
         print(
-            f"iteration: {iteration}, avg_grad: {avg_grad.item():.2f}, beta: {measured_beta:.4f}"
+            f"Iteration: {iteration}, Average |gradient|: {avg_grad.item():.2f}, Effective inverse temperature: {measured_beta:.4f}"
         )
