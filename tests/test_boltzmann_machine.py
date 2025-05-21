@@ -110,7 +110,6 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         x = torch.zeros((99, 2))
         padded = grbm._pad(x)
         self.assertTrue(padded[:, 1].isnan().all())
-        self.assertRaises(ValueError, self.bm._pad, x)
 
     def test_compute_effective_field(self):
         grbm = GRBM([0, 1, 2], [(0, 1), (0, 2), (1, 2)], [2])
@@ -254,7 +253,7 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         ones = torch.ones((1, 4))
         mones = -ones
         with self.subTest("Test gradients"):
-            obj = grbm.objective(ones, mones)
+            obj = grbm.quasi_objective(ones, mones)
             obj.backward()
             t1 = grbm.sufficient_statistics(ones)
             t2 = grbm.sufficient_statistics(mones)
@@ -267,8 +266,8 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
             s1 = torch.vstack([ones, ones, ones, pmones])
             s2 = torch.vstack([ones, ones, ones, mpones])
             s3 = torch.vstack([s2, s2])
-            self.assertEqual(-1, grbm.objective(s1, s2).item())
-            self.assertEqual(-1, grbm.objective(s1, s3))
+            self.assertEqual(-1, grbm.quasi_objective(s1, s2).item())
+            self.assertEqual(-1, grbm.quasi_objective(s1, s3))
 
 
 if __name__ == "__main__":

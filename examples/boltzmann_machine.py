@@ -99,12 +99,12 @@ def run(use_qpu: bool, num_reads: int, batch_size: int, n_iterations: int, fully
         # Reset the gradients of the model weights
         opt_grbm.zero_grad()
 
-        # Compute the objective---this objective yields the same gradient as the negative
+        # Compute a quasi-objective---this quasi-objective yields the same gradient as the negative
         # log likelihood of the model
-        objective = grbm.objective(x, s)
+        quasi_objective = grbm.quasi_objective(x, s)
 
         # Backpropgate gradients
-        objective.backward()
+        quasi_objective.backward()
 
         # Update model weights with a step of stochastic gradient descent
         opt_grbm.step()
@@ -118,4 +118,4 @@ def run(use_qpu: bool, num_reads: int, batch_size: int, n_iterations: int, fully
 
 
 if __name__ == "__main__":
-    run(False, 100, 100, 10, True)
+    run(False, 100, 100, 100, True)

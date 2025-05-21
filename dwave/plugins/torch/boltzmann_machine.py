@@ -77,9 +77,7 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         self.register_buffer("_edge_idx_i", edge_idx_i)
         self.register_buffer("_edge_idx_j", edge_idx_j)
 
-
-        self._fully_visible = hidden_nodes is None
-        if self._fully_visible:
+        if hidden_nodes is None:
             hidden_nodes = list()
         else:
             hidden_nodes = list(hidden_nodes)
@@ -100,9 +98,9 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
             raise NotImplementedError(err_message)
 
         visible_idx = torch.tensor([self._node_to_idx[v]
-                                    for v in self.nodes if v not in self.hidden_nodes])
+                                    for v in self.nodes if v not in self.hidden_nodes], dtype=int)
         hidden_idx = torch.tensor(
-            [i for i in torch.arange(self._n_nodes) if i not in visible_idx])
+            [i for i in torch.arange(self._n_nodes) if i not in visible_idx], dtype=int)
         self.register_buffer("_visible_idx", visible_idx)
         self.register_buffer("_hidden_idx", hidden_idx)
 
@@ -125,13 +123,13 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
             flat_adj.extend(edges.tolist())
         # ``self.flat_adj`` is a flattened adjacency list. It is flattened because
         # it would otherwise be a ragged tensor.
-        self.register_buffer("_flat_adj", torch.tensor(flat_adj))
+        self.register_buffer("_flat_adj", torch.tensor(flat_adj, dtype=int))
         # ``self.jidx`` is used to track the corresponding edge weights of the
         # flattened adjacency.
-        self.register_buffer("_flat_j_idx", torch.tensor(flat_j_idx))
+        self.register_buffer("_flat_j_idx", torch.tensor(flat_j_idx, dtype=int))
         # Because the adjacency list has been flattened, we need to track the
         # bin indices for each hidden unit.
-        self.register_buffer("_bin_idx", torch.tensor(bin_idx))
+        self.register_buffer("_bin_idx", torch.tensor(bin_idx, dtype=int))
         # Visually, this is the data structure we want to track.
         # [0 1 4 5 | 0 | 0 | 1 3 4 | ... ]
         # The bin indices denoted by pipes |.
@@ -192,20 +190,6 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
     def hidden_idx(self):
         """A ``torch.Tensor`` of model variable indices corresponding to hidden units."""
         return self._hidden_idx
-
-    @property
-    def fully_visible(self):
-        """A flag indicating whether the model is fully visible. This is the negation of
-        :attr:`~has_hidden` and exists for readability of code in contexts where it is more natural
-        to read "fully visible" instead of "has hidden"."""
-        return self._fully_visible
-
-    @property
-    def has_hidden(self):
-        """A flag indicating whether the model contains hidden units. This is the negation of
-        :attr:`~fully_visible` and exists for readability of code in contexts where it is more
-        natural to read "has hidden" instead of "fully visible"."""
-        return not self.fully_visible
 
     @property
     def edge_idx_i(self):
@@ -285,10 +269,11 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         """
         return sampleset_to_tensor(self._nodes, sample_set, device)
 
-    def objective(
-        self, s_observed: torch.Tensor, s_model: torch.Tensor
+    def quasi_objective(
+        self, s_observed: torch.Tensor, s_model: torch.Tensor, kind: str, *, sampler: None,
+        sample_kwargs: dict = None
     ) -> torch.Tensor:
-        """An objective function with gradients equivalent to the gradients of the
+        """A quasi-objective function with gradients equivalent to the gradients of the
         negative log likelihood.
 
         Args:
@@ -302,11 +287,10 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         Returns:
             torch.Tensor: Scalar difference of the average energy of data and model.
         """
-        if self._fully_visible:
-            obs = s_observed
-        else:
-            obs = self._compute_expectation_disconnected(s_observed)
-
+        # TODO: kind str or literal?
+        # TODO: check inside to make sure assumptions valid
+        obs = self._compute_expectation_disconnected(s_observed)
+        obs = self._approximate_expectation(s_observed, sample, sample_kwargs)
         return (
             self.sufficient_statistics(obs).mean(0, True)
             - self.sufficient_statistics(s_model).mean(0, True)
@@ -381,7 +365,7 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         h = {self._idx_to_node[i]: b for i, b in enumerate(h.cpu().tolist())}
         J = {
             (self._idx_to_node[a], self._idx_to_node[b]): w
-            for a, b, w in zip(edge_idx_i, edge_idx_j, J)
+            for a, b, w in zip(edge_idx_i, edge_idx_j, J.cpu().tolist())
         }
         return h, J
 
@@ -400,11 +384,8 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
             torch.Tensor: A (b, N) tensor of spin variables where N is the total number
                 of variables, i.e., number of visible and hidden units.
         """
-        if self._fully_visible:
-            raise ValueError("Fully-visible models should not `_pad` data.")
-
         bs = x.shape[0]
-        padded = torch.ones((bs, self._n_nodes), device=x.device) * torch.nan
+        padded = torch.nan * torch.ones((bs, self._n_nodes), device=x.device)
         padded[:, self.visible_idx] = x
         return padded
 
@@ -449,7 +430,7 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         cumulative_contribution = contribution.cumsum(1)
         # Don't forget to add the linear fields!
         h_eff = self._linear[self.hidden_idx] + cumulative_contribution[:, self._bin_idx].diff(
-            dim=1, prepend=torch.zeros(bs).unsqueeze(1)
+            dim=1, prepend=torch.zeros(bs, device=padded.device).unsqueeze(1)
         )
 
         return h_eff
