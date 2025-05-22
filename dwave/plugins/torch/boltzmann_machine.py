@@ -26,7 +26,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Hashable, Iterable
+import warnings
+from typing import TYPE_CHECKING, Hashable, Iterable, Literal
 
 import torch
 
@@ -84,15 +85,15 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         self._hidden_nodes = hidden_nodes
 
         # NOTE: `_setup_hidden` must be invoked as the last step as it depends on properties defined
-        #    above
+        #     above
         self._setup_hidden()
 
     def _setup_hidden(self):
         """Preprocess some indexes to enable vectorized computation of effective fields of hidden
         units."""
-        connected_hidden = any(
+        self._connected_hidden = any(
             a in self.hidden_nodes and b in self.hidden_nodes for a, b in self.edges)
-        if connected_hidden:
+        if self._connected_hidden:
             err_message = """Current implementation does not support intrahidden-unit
             connections. Please submit a feature request on GitHub."""
             raise NotImplementedError(err_message)
@@ -269,12 +270,13 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         """
         return sampleset_to_tensor(self._nodes, sample_set, device)
 
-    def quasi_objective(
-        self, s_observed: torch.Tensor, s_model: torch.Tensor, kind: str, *, sampler: None,
-        sample_kwargs: dict = None
-    ) -> torch.Tensor:
+    def quasi_objective(self, s_observed: torch.Tensor, s_model: torch.Tensor,
+                        kind: Literal["sampling", "exact-disc"],
+                        *, prefactor=None, h_range=None, j_range=None, sampler=None,
+                        sample_kwargs: dict = None) -> torch.Tensor:
         """A quasi-objective function with gradients equivalent to the gradients of the
         negative log likelihood.
+        TODO: update the docstring
 
         Args:
             s_observed (torch.Tensor): Tensor of observed spins (data) with shape
@@ -287,10 +289,22 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         Returns:
             torch.Tensor: Scalar difference of the average energy of data and model.
         """
-        # TODO: kind str or literal?
-        # TODO: check inside to make sure assumptions valid
-        obs = self._compute_expectation_disconnected(s_observed)
-        obs = self._approximate_expectation(s_observed, sample, sample_kwargs)
+        if kind == "exact-disc":
+            if sampler is not None or sample_kwargs is not None:
+                warning_msg = (f"`sampler` and `sample_kwargs` are not used "
+                               "({sampler}, {sample_kwargs})")
+                warnings.warn(warning_msg)
+            if self._connected_hidden:
+                err_msg = ('The "exact-disc" method requires hidden units to be disconnected from '
+                           'each other.')
+                raise ValueError(err_msg)
+            obs = self._compute_expectation_disconnected(s_observed)
+        elif kind == "sampling":
+            obs = self._approximate_expectation_sampling(s_observed, sampler,
+                                                         prefactor, h_range, j_range, sample_kwargs)
+        else:
+            err_msg = (f'Invalid `kind` ({kind}). Should be one of "sampling" or "exact-disc"')
+            raise ValueError(err_msg)
         return (
             self.sufficient_statistics(obs).mean(0, True)
             - self.sufficient_statistics(s_model).mean(0, True)
@@ -405,7 +419,7 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         return beta
 
     def _compute_effective_field(self, padded: torch.Tensor) -> torch.Tensor:
-        """Compute the effective field of disconnected hidden units.
+        """Compute effective fields of hidden units.
 
         Args:
             padded (torch.tensor): Tensor of shape (..., N) where N denotes the total
@@ -435,6 +449,49 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
 
         return h_eff
 
+    def _approximate_expectation_sampling(
+            self, obs: torch.Tensor, sampler, prefactor, h_range: tuple[float, float] = None,
+            j_range: tuple[float, float] = None, sample_kwargs: dict = None) -> torch.Tensor:
+        # Create the BQM and remove visible units
+        bqm = BinaryQuadraticModel.from_ising(*self.to_ising(prefactor, h_range, j_range))
+        bqm.remove_variables_from([self.idx_to_node[vidx] for vidx in self.visible_idx.tolist()])
+
+        # Compute the effective fields for hidden units
+        padded = self._pad(obs)
+        effective_fields = self._compute_effective_field(padded)
+
+        # Clip linear biases if a range is provided
+        if h_range is not None:
+            effective_fields.clip_(*h_range)
+
+        res = []
+        # Iterate over each observation and do conditional sampling
+        for spins, fields in zip(padded.tolist(), effective_fields.tolist()):
+            # Set linear biases with effective fields
+            for hidx, bias in zip(self.hidden_idx.tolist(), fields):
+                hnode = self.idx_to_node[hidx]
+                bqm.set_linear(hnode, bias)
+
+            # Clip quadratic biases if a range is provided
+            if j_range is not None:
+                lb, ub = j_range
+                for node_u, node_v, bias in bqm.iter_quadratic():
+                    if bias > ub:
+                        bqm.set_quadratic(node_u, node_v, ub)
+                    if bias < lb:
+                        bqm.set_quadratic(node_u, node_v, lb)
+
+            # Sample from conditional distribution
+            sample_set = sampler.sample(bqm, **sample_kwargs)
+            # Populate the hidden indices with the average
+            avg = torch.tensor(sample_set.record.sample).float().mean(0)
+            for idx_avg, node in enumerate(sample_set.variables):
+                idx = self.node_to_idx[node]
+                spins[idx] = avg[idx_avg]
+            res.append(spins)
+
+        return torch.tensor(res, device=obs.device)
+
     def _compute_expectation_disconnected(self, obs: torch.Tensor) -> torch.Tensor:
         """Compute and return the conditional expectation of spins including observed
         spins.
@@ -448,6 +505,10 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
                 ``obs`` where b is the sample size and N is the total number of
                 variables in the model, i.e., number of hidden and visible units.
         """
+        if self._connected_hidden:
+            err_msg = ("`_compute_expectation_disconnected` is not applicable when edges exist "
+                       "between hidden units.")
+            raise ValueError(err_msg)
         m = self._pad(obs)
         h_eff = self._compute_effective_field(m)
         m[:, self.hidden_idx] = -torch.tanh(h_eff)
