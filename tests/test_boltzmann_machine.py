@@ -253,7 +253,7 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         ones = torch.ones((1, 4))
         mones = -ones
         with self.subTest("Test gradients"):
-            obj = grbm.quasi_objective(ones, mones)
+            obj = grbm.quasi_objective(ones, mones, kind="exact-disc")
             obj.backward()
             t1 = grbm.sufficient_statistics(ones)
             t2 = grbm.sufficient_statistics(mones)
@@ -266,8 +266,8 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
             s1 = torch.vstack([ones, ones, ones, pmones])
             s2 = torch.vstack([ones, ones, ones, mpones])
             s3 = torch.vstack([s2, s2])
-            self.assertEqual(-1, grbm.quasi_objective(s1, s2).item())
-            self.assertEqual(-1, grbm.quasi_objective(s1, s3))
+            self.assertEqual(-1, grbm.quasi_objective(s1, s2, kind="exact-disc").item())
+            self.assertEqual(-1, grbm.quasi_objective(s1, s3, kind="exact-disc"))
 
 
 if __name__ == "__main__":
