@@ -21,7 +21,7 @@ from dwave.system import DWaveSampler
 
 
 def run(use_qpu: bool, num_reads: int, batch_size: int, n_iterations: int, fully_visible: bool):
-    """Run an example of fitting the a graph-restricted Boltzmann machine to synthetic data generated
+    """Run an example of fitting a graph-restricted Boltzmann machine to synthetic data generated
     uniformly randomly.
 
     Args:
@@ -101,10 +101,12 @@ def run(use_qpu: bool, num_reads: int, batch_size: int, n_iterations: int, fully
 
         # Compute a quasi-objective---this quasi-objective yields the same gradient as the negative
         # log likelihood of the model
-        quasi_objective = grbm.quasi_objective(x, s)
+        quasi = grbm.quasi_objective(x, s,
+                                     kind="sampling", sampler=sampler, sample_kwargs=sample_kwargs,
+                                     prefactor=prefactor, linear_range=h_range, quadratic_range=j_range)
 
         # Backpropgate gradients
-        quasi_objective.backward()
+        quasi.backward()
 
         # Update model weights with a step of stochastic gradient descent
         opt_grbm.step()
@@ -118,4 +120,5 @@ def run(use_qpu: bool, num_reads: int, batch_size: int, n_iterations: int, fully
 
 
 if __name__ == "__main__":
-    run(False, 100, 100, 100, True)
+    # Run example of fitting a Boltzmann machine with a classical sampler
+    run(use_qpu=False, num_reads=100, batch_size=100, n_iterations=100, fully_visible=False)

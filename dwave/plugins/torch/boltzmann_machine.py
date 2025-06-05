@@ -27,7 +27,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING, Hashable, Iterable, Literal
+from typing import TYPE_CHECKING, Hashable, Iterable, Literal, Optional
 
 import torch
 
@@ -56,36 +56,39 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
             also be listed in the input ``nodes``.
     """
 
-    def __init__(self, nodes: Iterable[Hashable],
-                 edges: Iterable[tuple[Hashable, Hashable]],
-                 hidden_nodes: Iterable[Hashable] = None):
+    def __init__(
+        self,
+        nodes: Iterable[Hashable],
+        edges: Iterable[tuple[Hashable, Hashable]],
+        hidden_nodes: Optional[Iterable[Hashable]] = None
+    ) -> None:
         super().__init__()
         nodes = list(nodes)
         edges = list(edges)
-        self._n_nodes = len(nodes)
-        self._idx_to_node = {i: v for i, v in enumerate(nodes)}
-        self._node_to_idx = {v: i for i, v in self._idx_to_node.items()}
+
         self._nodes = list(nodes)
         self._edges = list(edges)
 
+        self._n_nodes = len(nodes)
         self._n_edges = len(edges)
-        edge_idx_i = torch.tensor([self._node_to_idx[i] for i, j in edges])
-        edge_idx_j = torch.tensor([self._node_to_idx[j] for i, j in edges])
+
+        self._idx_to_node = {i: v for i, v in enumerate(nodes)}
+        self._node_to_idx = {v: i for i, v in self._idx_to_node.items()}
 
         self._linear = torch.nn.Parameter(0.05 * (2 * torch.rand(self._n_nodes) - 1))
         self._quadratic = torch.nn.Parameter(5.0 * (2 * torch.rand(self._n_edges) - 1))
 
+        edge_idx_i = torch.tensor([self._node_to_idx[i] for i, _ in edges])
+        edge_idx_j = torch.tensor([self._node_to_idx[j] for _, j in edges])
         self.register_buffer("_edge_idx_i", edge_idx_i)
         self.register_buffer("_edge_idx_j", edge_idx_j)
 
         if hidden_nodes is None:
-            hidden_nodes = list()
+            self._hidden_nodes = []
         else:
-            hidden_nodes = list(hidden_nodes)
-        self._hidden_nodes = hidden_nodes
-
-        # NOTE: `_setup_hidden` must be invoked as the last step as it depends on properties defined
-        #     above
+            self._hidden_nodes = list(hidden_nodes)
+        # NOTE: `_setup_hidden` must be invoked as the last step as it depends on properties
+        #     defined above
         self._setup_hidden()
 
     def _setup_hidden(self):
@@ -94,8 +97,7 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         self._connected_hidden = any(
             a in self.hidden_nodes and b in self.hidden_nodes for a, b in self.edges)
         if self._connected_hidden:
-            err_message = """Current implementation does not support intrahidden-unit
-            connections. Please submit a feature request on GitHub."""
+            err_message = "Current implementation does not support intrahidden-unit connections."
             raise NotImplementedError(err_message)
 
         visible_idx = torch.tensor([self._node_to_idx[v]
@@ -109,11 +111,11 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         # indices in order to vectorize computations. These indices will be used in
         # the :meth:`GraphRestrictedBoltzmannMachine._compute_effective_field` and
         # details are described there.
-        flat_adj = list()
-        bin_idx = list()
+        flat_adj = []
+        bin_idx = []
         bin_pointer = -1
         quadratic_idx = torch.arange(self._n_edges)
-        flat_j_idx = list()
+        flat_j_idx = []
         for idx in self.hidden_idx.tolist():
             mask_i = self._edge_idx_i == idx
             mask_j = self._edge_idx_j == idx
@@ -195,12 +197,14 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
     @property
     def edge_idx_i(self):
         """A ``torch.Tensor`` of model variable indices corresponding to one endpoints of edges.
+
         The other endpoint of edges is stored in :attr:`~edge_idx_j`."""
         return self._edge_idx_i
 
     @property
     def edge_idx_j(self):
         """A ``torch.Tensor`` of model variable indices corresponding to one endpoints of edges.
+
         The other endpoint of edges is stored in :attr:`~edge_idx_i`."""
         return self._edge_idx_j
 
@@ -215,11 +219,11 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         self,
         sampler: Sampler,
         prefactor: float,
-        h_range: tuple[float, float] = None,
-        j_range: tuple[float, float] = None,
+        linear_range: Optional[tuple[float, float]] = None,
+        quadratic_range: Optional[tuple[float, float]] = None,
         *,
-        device: torch.device = None,
-        sample_params: dict = None,
+        device: Optional[torch.device] = None,
+        sample_params: Optional[dict] = None,
     ) -> torch.Tensor:
         """Sample from the Boltzmann machine.
 
@@ -241,22 +245,22 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
                 If ``None`` and data is a tensor then the device of data is used.
                 If ``None`` and data is not a tensor then the result tensor is
                 constructed on the current device.
-            sampler_params (dict): Parameters of the `sampler.sample` method.
+            sampler_params (dict, optional): Parameters of the `sampler.sample` method.
 
         Returns:
             torch.Tensor: Spins sampled from the model
-                (shape prescribed by ``sampler`` and ``sample_params``).
+            (shape prescribed by ``sampler`` and ``sample_params``).
         """
         if sample_params is None:
             sample_params = dict()
-        h, J = self.to_ising(prefactor, h_range, j_range)
+        h, J = self.to_ising(prefactor, linear_range, quadratic_range)
         ss = spread(sampler.sample_ising(h, J, **sample_params))
         spins = self.sampleset_to_tensor(ss, device=device)
         return spins
 
     def sampleset_to_tensor(
-            self, sample_set: SampleSet, device: torch.device = None) -> torch.Tensor:
-        """Converts a ``dimod.SampleSet`` to a ``torch.Tensor``.
+            self, sample_set: SampleSet, device: Optional[torch.device] = None) -> torch.Tensor:
+        """Converts a ``dimod.SampleSet`` to a ``torch.Tensor`` using the node order of the class.
 
         Args:
             sample_set (dimod.SampleSet): A sample set.
@@ -270,13 +274,20 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         """
         return sampleset_to_tensor(self._nodes, sample_set, device)
 
-    def quasi_objective(self, s_observed: torch.Tensor, s_model: torch.Tensor,
-                        kind: Literal["sampling", "exact-disc"],
-                        *, prefactor=None, h_range=None, j_range=None, sampler=None,
-                        sample_kwargs: dict = None) -> torch.Tensor:
+    def quasi_objective(
+        self,
+        s_observed: torch.Tensor,
+        s_model: torch.Tensor,
+        kind: Literal["sampling", "exact-disc"],
+        *,
+        prefactor: Optional[float] = None,
+        linear_range: Optional[tuple[float, float]] = None,
+        quadratic_range: Optional[tuple[float, float]] = None,
+        sampler: Optional[Sampler] = None,
+        sample_kwargs: Optional[dict] = None
+    ) -> torch.Tensor:
         """A quasi-objective function with gradients equivalent to the gradients of the
         negative log likelihood.
-        TODO: update the docstring
 
         Args:
             s_observed (torch.Tensor): Tensor of observed spins (data) with shape
@@ -285,25 +296,47 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
             s_model (torch.Tensor): Tensor of spins drawn from the model with shape
                 (b2, N) where b2 denotes the batch size and N denotse the number of
                 variables in the model.
+            kind (Literal["sampling", "exact-disc"]): Method for computing, or approximating,
+                marginal expectations given partial observations.
+                The "sampling" method samples, conditionally, for each observation.
+                The "exact-disc" method computes exact margnials for when hidden units are
+                disconnected, i.e., no connections between hidden units.
+            prefactor (float, optional): A scaling applied to the Hamiltonian weights (linear and
+                quadratic weights). When None, no scaling is applied. Defaults to None.
+            linear_range (tuple[float, float], optional): Linear weights are clipped to ``linear_range`` prior
+                to sampling. This clipping occurs after the ``prefactor`` scaling has been applied.
+                When None, no clipping is applied. Defaults to None.
+            quadratic_range (tuple[float, float], optional): Quadratic weights are clipped to ``quadratic_range``
+                prior to sampling. This clipping occurs after the ``prefactor`` scaling has been
+                applied. When None, no clipping is applied.Defaults to None.
+            sampler (Sampler, optional): The sampler used to sample the model and is only required
+                when ``kind`` is "sampling". Defaults to None.
+            sample_kwargs (dict, optional): Sample kwargs for ``sampler``. Defaults to None.
 
         Returns:
-            torch.Tensor: Scalar difference of the average energy of data and model.
+            torch.Tensor: Scalar difference of the average energy of data and model whose gradients
+            are equivalent to the gradients of the negative log likelihood.
         """
         if kind == "exact-disc":
-            if sampler is not None or sample_kwargs is not None:
-                warning_msg = (f"`sampler` and `sample_kwargs` are not used "
-                               "({sampler}, {sample_kwargs})")
+            if sampler or sample_kwargs:
+                warning_msg = (
+                    "`sampler` and `sample_kwargs` are not used "
+                    f"({sampler}, {sample_kwargs})"
+                )
                 warnings.warn(warning_msg)
             if self._connected_hidden:
-                err_msg = ('The "exact-disc" method requires hidden units to be disconnected from '
-                           'each other.')
+                err_msg = (
+                    'The "exact-disc" method requires hidden units to be disconnected from '
+                    'each other.'
+                )
                 raise ValueError(err_msg)
             obs = self._compute_expectation_disconnected(s_observed)
         elif kind == "sampling":
-            obs = self._approximate_expectation_sampling(s_observed, sampler,
-                                                         prefactor, h_range, j_range, sample_kwargs)
+            obs = self._approximate_expectation_sampling(
+                s_observed, sampler, prefactor, linear_range, quadratic_range, sample_kwargs
+            )
         else:
-            err_msg = (f'Invalid `kind` ({kind}). Should be one of "sampling" or "exact-disc"')
+            err_msg = f'Invalid kind ({kind}). Should be one of "sampling" or "exact-disc"'
             raise ValueError(err_msg)
         return (
             self.sufficient_statistics(obs).mean(0, True)
@@ -331,7 +364,7 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
 
         Returns:
             torch.tensor: Tensor of interaction terms of shape (..., M) where M denotes
-                the number of edges in the model.
+            the number of edges in the model.
         """
         return x[..., self.edge_idx_i] * x[..., self.edge_idx_j]
 
@@ -350,36 +383,38 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         interactions = self.interactions(x)
         return torch.cat([x, interactions], 1)
 
-    def to_ising(self, prefactor: float, h_range: tuple[float, float] = None,
-                 j_range: tuple[float, float] = None) -> tuple[dict, dict]:
-        """Convert the model to Ising format with scaling (``prefactor``) followed by clipping (if
-        ``h_range`` and/or ``j_range`` are supplied).
+    def to_ising(self, prefactor: float, linear_range: Optional[tuple[float, float]] = None,
+                 quadratic_range: Optional[tuple[float, float]] = None) -> tuple[dict, dict]:
+        """Convert the model to Ising format.
+
+        Convert the model to Ising format with scaling (``prefactor``) followed by clipping (if
+        ``linear_range`` and/or ``quadratic_range`` are supplied).
 
         Args:
             prefactor (float): A scaling term applied to the linear and quadratic biases prior to,
                 if applicable, clipping.
-            h_range (tuple[float, float], Optional): The minimum and maximum values to clip linear
+            linear_range (tuple[float, float], Optional): The minimum and maximum values to clip linear
                 biases with.
-            j_range (tuple[float, float], Optional): The minimum and maximum values to clip
+            quadratic_range (tuple[float, float], Optional): The minimum and maximum values to clip
                 quadratic biases with.
 
         Returns:
             tuple[dict, dict]: The linear and quadratic biases in dictionary format compatible with
-                `dimod.Sampler.sample_ising`.
+            `dimod.Sampler.sample_ising`.
         """
-        h = prefactor * self._linear.detach()
-        J = prefactor * self._quadratic.detach()
-        if h_range is not None:
-            h = h.clip(*h_range)
-        if j_range is not None:
-            J = J.clip(*j_range)
+        linear = prefactor * self._linear.detach()
+        quadratic = prefactor * self._quadratic.detach()
+        if linear_range is not None:
+            linear = linear.clip(*linear_range)
+        if quadratic_range is not None:
+            quadratic = quadratic.clip(*quadratic_range)
 
         edge_idx_i = self.edge_idx_i.detach().cpu().tolist()
         edge_idx_j = self.edge_idx_j.detach().cpu().tolist()
-        h = {self._idx_to_node[i]: b for i, b in enumerate(h.cpu().tolist())}
+        h = {self._idx_to_node[i]: b for i, b in enumerate(linear.cpu().tolist())}
         J = {
             (self._idx_to_node[a], self._idx_to_node[b]): w
-            for a, b, w in zip(edge_idx_i, edge_idx_j, J.cpu().tolist())
+            for a, b, w in zip(edge_idx_i, edge_idx_j, quadratic.cpu().tolist())
         }
         return h, J
 
@@ -396,7 +431,7 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
 
         Returns:
             torch.Tensor: A (b, N) tensor of spin variables where N is the total number
-                of variables, i.e., number of visible and hidden units.
+            of variables, i.e., number of visible and hidden units.
         """
         bs = x.shape[0]
         padded = torch.nan * torch.ones((bs, self._n_nodes), device=x.device)
@@ -450,10 +485,39 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         return h_eff
 
     def _approximate_expectation_sampling(
-            self, obs: torch.Tensor, sampler, prefactor, h_range: tuple[float, float] = None,
-            j_range: tuple[float, float] = None, sample_kwargs: dict = None) -> torch.Tensor:
+            self,
+            obs: torch.Tensor,
+            sampler: Sampler,
+            prefactor: float,
+            linear_range: Optional[tuple[float, float]] = None,
+            quadratic_range: Optional[tuple[float, float]] = None,
+            sample_kwargs: Optional[dict] = None
+    ) -> torch.Tensor:
+        """Approximate expectation of hidden units via sampling.
+
+        This is a computationally expensive method as it requires performing sampling for every
+        observation in ``obs``.
+
+        Args:
+            obs (torch.Tensor): The partially-observed data corresponding to visible units of
+                the model. It should have shape (b, N) where b is the batch size and N is the number
+                of visible units in the model.
+            sampler (Sampler): The sampler used to approximate expectations.
+            prefactor (float): A scaling term applied to the linear and quadratic biases prior to,
+                if applicable, clipping.
+            linear_range (tuple[float, float], Optional): The minimum and maximum values to clip linear
+                biases with.
+            quadratic_range (tuple[float, float], Optional): The minimum and maximum values to clip
+                quadratic biases with.
+            sample_kwargs (dict, optional): Sample kwargs for ``sampler``. Defaults to None.
+
+        Returns:
+            torch.Tensor: A tensor of shape (b, N) where N is the total number of variables in the
+            model, i.e., number of hidden and visible units and number of visible units.
+        """
         # Create the BQM and remove visible units
-        bqm = BinaryQuadraticModel.from_ising(*self.to_ising(prefactor, h_range, j_range))
+        bqm = BinaryQuadraticModel.from_ising(
+            *self.to_ising(prefactor, linear_range, quadratic_range))
         bqm.remove_variables_from([self.idx_to_node[vidx] for vidx in self.visible_idx.tolist()])
 
         # Compute the effective fields for hidden units
@@ -461,8 +525,8 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         effective_fields = self._compute_effective_field(padded)
 
         # Clip linear biases if a range is provided
-        if h_range is not None:
-            effective_fields.clip_(*h_range)
+        if linear_range is not None:
+            effective_fields.clip_(*linear_range)
 
         res = []
         # Iterate over each observation and do conditional sampling
@@ -473,8 +537,8 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
                 bqm.set_linear(hnode, bias)
 
             # Clip quadratic biases if a range is provided
-            if j_range is not None:
-                lb, ub = j_range
+            if quadratic_range is not None:
+                lb, ub = quadratic_range
                 for node_u, node_v, bias in bqm.iter_quadratic():
                     if bias > ub:
                         bqm.set_quadratic(node_u, node_v, ub)
@@ -502,8 +566,8 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
 
         Returns:
             torch.Tensor: A (b, N)-shaped tensor of expected spins conditioned on
-                ``obs`` where b is the sample size and N is the total number of
-                variables in the model, i.e., number of hidden and visible units.
+            ``obs`` where b is the sample size and N is the total number of
+            variables in the model, i.e., number of hidden and visible units.
         """
         if self._connected_hidden:
             err_msg = ("`_compute_expectation_disconnected` is not applicable when edges exist "
