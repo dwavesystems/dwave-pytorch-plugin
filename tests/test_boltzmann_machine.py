@@ -137,10 +137,10 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         grbm._quadratic.data = torch.tensor([-0.7, 0.13, -0.17])
         obs = torch.tensor([[-1.0, 1.0]])
         expected = grbm._compute_expectation_disconnected(obs).tolist()
-        # effective field = quadratic(0,1) + quadratic(0,2) + linear(2)
+        # effective field = -quadratic(a,c) + quadratic(b,c) + linear(c)
         #                 = -0.13 - 0.17 + 0.4 = 0.1
         # expectation = tanh(effective field) = tanh(0.1)
-        torch.testing.assert_close(expected, [[-1.0, torch.tanh(torch.tensor(0.1)).item(), 1.0]])
+        torch.testing.assert_close(expected, [[-1.0, torch.tanh(torch.tensor(-0.1)).item(), 1.0]])
 
     def test_sufficient_statistics(self):
         # Model for reference:
