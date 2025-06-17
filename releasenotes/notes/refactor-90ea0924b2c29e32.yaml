@@ -1,0 +1,13 @@
+---
+prelude: >
+    Refactor ``GraphRestrictedBoltzmannMachine`` to be defined by node and edge lists.
+features:
+    - Support hidden units.
+upgrade:
+    - Decouple sampling parameters (beta) from the model.
+    - Reduce number of operations in the GRBM objective function.
+    - Remove networkx dependency.
+    - Simplify ``GraphRestrictedBoltzmannMachine`` constructor to require only node and edge lists.
+deprecations:
+    - Simplify ``GraphRestrictedBoltzmannMachine`` constructor to require only node and edge lists.
+    - Remove abstract base class.
