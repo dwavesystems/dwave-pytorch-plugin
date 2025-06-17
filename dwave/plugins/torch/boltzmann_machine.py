@@ -209,8 +209,9 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
 
     @property
     def theta(self) -> torch.Tensor:
-        """Parameters of the model---linear and quadratic biases---as a one-dimensional
-        tensor. The linear and quadratic biases are concatenated in the order as defined
+        """Parameters of the model---linear and quadratic biases---as a one-dimensional tensor.
+
+        The linear and quadratic biases are concatenated in the order as defined
         by the model's input ``nodes`` and ``edges``."""
         return torch.cat([self._linear, self._quadratic])
 
