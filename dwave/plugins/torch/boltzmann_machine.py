@@ -250,7 +250,7 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
                 If ``None`` and data is a tensor then the device of data is used.
                 If ``None`` and data is not a tensor then the result tensor is
                 constructed on the current device.
-            sampler_params (dict, optional): Parameters of the `sampler.sample` method.
+            sample_params (dict, optional): Parameters of the `sampler.sample` method.
 
         Returns:
             torch.Tensor: Spins sampled from the model
