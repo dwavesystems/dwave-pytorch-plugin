@@ -208,7 +208,7 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
             for x_true, x_observed in zip([-0.05, 1, 2, 0], J_list):
                 self.assertAlmostEqual(x_true, x_observed)
 
-    def test__approximate_expectation_sampling(self):
+    def test_approximate_expectation_sampling(self):
         grbm = GRBM(list("acb"), [("a", "b"), ("a", "c"), ("b", "c")], ["c"])
         #         (0.13)
         # Model: c ----- a
