@@ -55,7 +55,7 @@ def run(use_qpu: bool, num_reads: int, batch_size: int, n_iterations: int, fully
         sample_kwargs = dict(
             num_reads=num_reads,
             beta_range=[1, 1],
-            proposal_acceptance_criterion="Gibbs",
+            proposal_acceptance_criteria="Gibbs",
             randomize_order=True,
         )
         zephyr_grid_size = 6
@@ -82,7 +82,7 @@ def run(use_qpu: bool, num_reads: int, batch_size: int, n_iterations: int, fully
     X = 1 - 2.0 * torch.randint(0, 2, (n_iterations, batch_size, n_vis))
 
     # Instantiate the model
-    grbm = GRBM(list(G.nodes), list(G.edges), hidden_nodes)
+    grbm = GRBM(G.nodes, G.edges, hidden_nodes)
 
     # Instantiate the optimizer
     opt_grbm = SGD(grbm.parameters(), 0.1)
@@ -101,9 +101,9 @@ def run(use_qpu: bool, num_reads: int, batch_size: int, n_iterations: int, fully
 
         # Compute a quasi-objective---this quasi-objective yields the same gradient as the negative
         # log likelihood of the model
-        quasi = grbm.quasi_objective(x, s,
-                                     kind="sampling", sampler=sampler, sample_kwargs=sample_kwargs,
-                                     prefactor=prefactor, linear_range=h_range, quadratic_range=j_range)
+        quasi = grbm.quasi_objective(
+            x, s, kind="sampling", sampler=sampler, sample_kwargs=sample_kwargs,
+            prefactor=prefactor, linear_range=h_range, quadratic_range=j_range)
 
         # Backpropgate gradients
         quasi.backward()
@@ -122,3 +122,6 @@ def run(use_qpu: bool, num_reads: int, batch_size: int, n_iterations: int, fully
 if __name__ == "__main__":
     # Run example of fitting a Boltzmann machine with a classical sampler
     run(use_qpu=False, num_reads=100, batch_size=100, n_iterations=100, fully_visible=False)
+    run(use_qpu=False, num_reads=100, batch_size=100, n_iterations=100, fully_visible=False)
+    run(use_qpu=True, num_reads=100, batch_size=100, n_iterations=100, fully_visible=True)
+    run(use_qpu=True, num_reads=100, batch_size=100, n_iterations=100, fully_visible=False)

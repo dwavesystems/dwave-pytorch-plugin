@@ -127,21 +127,20 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         self.assertAlmostEqual(h_eff.item(), 0.1)
 
     def test_compute_expectation_disconnected(self):
-        grbm = GRBM([0, 1, 2], [(0, 1), (0, 2), (1, 2)], [2])
+        grbm = GRBM(list("acb"), [("a", "b"), ("a", "c"), ("b", "c")], ["c"])
         #         (0.13)
-        # Model: 2 ----- 0
+        # Model: c ----- a
         #         \      |
         #  (-0.17) \     |  (-0.7)
-        #           \ 1 /
-        grbm._linear.data = torch.tensor([-0.1, -0.2, 0.4])
+        #           \ b /
+        grbm._linear.data = torch.tensor([-0.1, 0.4, -0.2])
         grbm._quadratic.data = torch.tensor([-0.7, 0.13, -0.17])
         obs = torch.tensor([[-1.0, 1.0]])
-        expected = grbm._compute_expectation_disconnected(obs)[0].tolist()
-        self.assertListEqual(expected[:2], [-1, 1])
+        expected = grbm._compute_expectation_disconnected(obs).tolist()
         # effective field = quadratic(0,1) + quadratic(0,2) + linear(2)
         #                 = -0.13 - 0.17 + 0.4 = 0.1
-        # expectation = -tanh(effective field) = tanh(0.1 * 1.337)
-        self.assertAlmostEqual(expected[-1], -torch.tanh(torch.tensor(0.1)).item())
+        # expectation = tanh(effective field) = tanh(0.1)
+        torch.testing.assert_close(expected, [[-1.0, torch.tanh(torch.tensor(0.1)).item(), 1.0]])
 
     def test_sufficient_statistics(self):
         # Model for reference:
@@ -208,6 +207,29 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
                 self.assertAlmostEqual(x_true, x_observed)
             for x_true, x_observed in zip([-0.05, 1, 2, 0], J_list):
                 self.assertAlmostEqual(x_true, x_observed)
+
+    def test__approximate_expectation_sampling(self):
+        grbm = GRBM(list("acb"), [("a", "b"), ("a", "c"), ("b", "c")], ["c"])
+        #         (0.13)
+        # Model: c ----- a
+        #         \      |
+        #  (-0.17) \     |  (-0.7)
+        #           \ b /
+        grbm._linear.data = torch.tensor([-0.1, 0.4, -0.2])
+        grbm._quadratic.data = torch.tensor([-0.7, 0.13, -0.17])
+        obs = torch.tensor([[-1.0, 1.0], [-1.0, -1.0]])
+        sampler = IdentitySampler()
+        prefactor = 999
+
+        fake_samples = ([[-1], [1]], ["c"])
+        expectation = grbm._approximate_expectation_sampling(
+            obs, sampler, prefactor, sample_kwargs=dict(initial_states=fake_samples)).tolist()
+        self.assertListEqual(expectation, [[-1, 0.0, 1], [-1, 0.0, -1]])
+
+        fake_samples = ([[1], [1]], ["c"])
+        expectation = grbm._approximate_expectation_sampling(
+            obs, sampler, prefactor, sample_kwargs=dict(initial_states=fake_samples)).tolist()
+        self.assertListEqual(expectation, [[-1, 1, 1.0], [-1, 1, -1.0]])
 
     def test_sampleset_to_tensor(self):
         grbm = GRBM(list("cabd"), ["ab", "ac", "bc"])
