@@ -57,6 +57,10 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
             [self.bm._idx_to_node[i] for i in range(self.bm._n_nodes)], self.bm._nodes
         )
         self.assertRaises(NotImplementedError, GRBM, [0, 1, 2], [[0, 1]], [0, 1])
+        self.bm.set_linear({"d": 999})
+        self.assertEqual(999, self.bm.linear[0])
+        self.bm.set_quadratic({("d", "b"): 999})
+        self.assertEqual(999, self.bm.quadratic[0])
 
     def test_forward(self):
         # Model for reference:
@@ -275,7 +279,7 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         ones = torch.ones((1, 4))
         mones = -ones
         with self.subTest("Test gradients"):
-            obj = grbm.quasi_objective(ones, mones, kind="exact-disc")
+            obj = grbm.quasi_objective(ones, mones)
             obj.backward()
             t1 = grbm.sufficient_statistics(ones)
             t2 = grbm.sufficient_statistics(mones)
@@ -288,8 +292,8 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
             s1 = torch.vstack([ones, ones, ones, pmones])
             s2 = torch.vstack([ones, ones, ones, mpones])
             s3 = torch.vstack([s2, s2])
-            self.assertEqual(-1, grbm.quasi_objective(s1, s2, kind="exact-disc").item())
-            self.assertEqual(-1, grbm.quasi_objective(s1, s3, kind="exact-disc"))
+            self.assertEqual(-1, grbm.quasi_objective(s1, s2).item())
+            self.assertEqual(-1, grbm.quasi_objective(s1, s3))
 
 
 if __name__ == "__main__":
