@@ -15,50 +15,19 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import networkx as nx
-import numpy as np
 import torch
-from dimod import SampleSet
-from hybrid.composers import AggregatedSamples
-
-from dwave.system import FixedEmbeddingComposite
 
 if TYPE_CHECKING:
-    from dwave.system import DWaveSampler
-
-spread = AggregatedSamples.spread
+    from dimod import SampleSet
 
 
-def make_sampler_and_graph(
-    qpu: DWaveSampler,
-) -> tuple[FixedEmbeddingComposite, nx.Graph]:
-    """A helper function that maps a QPU's variables to contiguous nonnegative integers.
-
-    Mapping variables to contiguous nonnegative integers is a requirement motivated by
-    convenience and efficiency for applying tensor operations downstream.
-
-    Args:
-        qpu (DWaveSampler): The ``dwave.system.DWaveSampler`` QPU for which an embedded
-            composite sampler with linear variables is created.
-
-    Returns:
-        tuple[FixedEmbeddingComposite, nx.Graph]: The sampler with linear
-            variables and its corresponding graph.
-    """
-    G = qpu.to_networkx_graph()
-    mapping = {physical: logical for physical, logical in zip(G, range(len(G)))}
-
-    G = nx.relabel_nodes(G, mapping)
-    sampler = FixedEmbeddingComposite(qpu, {l_: [p] for p, l_ in mapping.items()})
-    return sampler, G
-
-
-def sample_to_tensor(
-    sample_set: SampleSet, device: torch.device | None = None
+def sampleset_to_tensor(
+    ordered_vars: list, sample_set: SampleSet, device: torch.device | None = None
 ) -> torch.Tensor:
     """Converts a ``dimod.SampleSet`` to a ``torch.Tensor``.
 
     Args:
+        ordered_vars: list[Literal]: The desired order of sample set variables.
         sample_set (dimod.SampleSet): A sample set.
         device (torch.device, optional): The device of the constructed tensor.
             If ``None`` and data is a tensor then the device of data is used.
@@ -68,9 +37,7 @@ def sample_to_tensor(
     Returns:
         torch.Tensor: The sample set as a ``torch.Tensor``.
     """
-    # Need to sort first because this module assumes variables are labelled by integers
-    # and ordered as such
-    indices = np.argsort(sample_set.variables)
-    sample = sample_set.record.sample[:, indices]
-
+    var_to_sample_i = {v: i for i, v in enumerate(sample_set.variables)}
+    permutation = [var_to_sample_i[v] for v in ordered_vars]
+    sample = sample_set.record.sample[:, permutation]
     return torch.tensor(sample, dtype=torch.float32, device=device)

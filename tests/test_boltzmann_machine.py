@@ -14,30 +14,31 @@
 
 import unittest
 
-import networkx as nx
 import torch
-from dimod import BinaryQuadraticModel, IdentitySampler
+from dimod import SPIN, BinaryQuadraticModel, IdentitySampler, SampleSet
 
-from dwave.plugins.torch.boltzmann_machine import (
-    GraphRestrictedBoltzmannMachine as GRBM,
-)
+from dwave.plugins.torch.boltzmann_machine import GraphRestrictedBoltzmannMachine as GRBM
+from dwave.system.temperatures import maximum_pseudolikelihood_temperature as mple
 
 
 class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
     def setUp(self) -> None:
         # Create a triangle graph with an additional dangling vertex
-        self.edges = [[0, 1], [0, 2], [0, 3], [1, 2]]
-        self.a, self.b = torch.tensor(self.edges).mT
-        self.G = nx.from_edgelist(self.edges)
-        self.n = self.G.number_of_nodes()
+        #       a
+        #     / | \
+        #    b--c  d
+        # Note the node order is deliberately "dbac" in order to test variable orderings
+        self.nodes = list("dbac")
+        self.edges = [["a", "b"], ["a", "c"], ["a", "d"], ["b", "c"]]
+        self.n = 4
 
         # Manually set the parameter weights for testing
         dtype = torch.float32
         h = [0.0, 1, 2, 3]
 
-        bm = GRBM(self.n, *torch.tensor(self.edges).mT)
-        bm.h.data = torch.tensor(h, dtype=dtype)
-        bm.J.data = torch.tensor([1, 2, 3, 6], dtype=dtype)
+        bm = GRBM(self.nodes, self.edges)
+        bm._linear.data = torch.tensor(h, dtype=dtype)
+        bm._quadratic.data = torch.tensor([1, 2, 3, 6], dtype=dtype)
 
         self.bm = bm
 
@@ -50,123 +51,245 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         self.sample_2 = torch.vstack([self.ones, self.ones, self.ones, self.mpones])
         return super().setUp()
 
-    def test_register_forward_pre_hook(self):
-        self.bm.h_range = torch.tensor([-0.1, 0.1])
-        self.bm.j_range = torch.tensor([-0.1, 0.2])
-        self.assertEqual(-0.1 * 3 + 4 * 0.2, self.bm(self.mones).item())
+    def test_constructor(self):
+        self.assertListEqual(list("dbac"), self.bm._nodes)
+        self.assertListEqual(
+            [self.bm._idx_to_node[i] for i in range(self.bm._n_nodes)], self.bm._nodes
+        )
+        self.assertRaises(NotImplementedError, GRBM, [0, 1, 2], [[0, 1]], [0, 1])
 
     def test_forward(self):
+        # Model for reference:
+        #       a
+        #     / | \
+        #    b--c  d
+        # Linear biases for reference:
+        # 0 1 2 3
+        # d b a c
+        # Edge list and weights for reference:
+        # [["a", "b"], ["a", "c"], ["a", "d"], ["b", "c"]]
+        #       1           2           3           6
         with self.subTest("Manually-computed energies"):
             self.assertEqual(18, self.bm(self.ones).item())
             self.assertEqual(6, self.bm(self.mones).item())
-            self.assertEqual(-10, self.bm(self.pmones).item())
-            self.assertEqual(-6, self.bm(self.mpones).item())
-            self.assertListEqual([18, 18, 18, -10], self.bm(self.sample_1).tolist())
+            # 1 -1 1 -1
+            # d  b a  c
+            self.assertEqual(4, self.bm(self.pmones).item())
+            # -1 1 -1 1
+            #  d b  a c
+            self.assertEqual(8, self.bm(self.mpones).item())
+            self.assertListEqual([18, 18, 18, 4], self.bm(self.sample_1).tolist())
 
         with self.subTest(
             "Arbitrary-valued weights and spins should match dimod.BQM energy"
         ):
-            self.bm.h.data = torch.linspace(-412, 23, 4)
+            self.bm._linear.data = torch.linspace(-412, 23, 4)
             new_J = torch.linspace(-0.4, 4, 4**2)
-            self.bm.J.data = new_J[: len(self.bm.J)]
+            self.bm._quadratic.data = new_J[: len(self.bm._quadratic)]
 
-            bqm = BinaryQuadraticModel.from_ising(*self.bm.ising)
+            bqm = BinaryQuadraticModel.from_ising(*self.bm.to_ising(1))
 
             fake_spins = 1.0 * torch.arange(1, 5).unsqueeze(0)
 
-            en_bqm = bqm.energies(fake_spins.numpy()).item()
+            en_bqm = bqm.energies((fake_spins.numpy(), "dbac")).item()
             en_boltz = self.bm(fake_spins).item()
             self.assertAlmostEqual(en_bqm, en_boltz, 4)
 
-    def test_objective(self):
-        s1 = self.sample_1
-        s2 = self.sample_2
-        s3 = torch.vstack([self.sample_2, self.sample_2])
-        self.assertEqual(-1, self.bm.objective(s1, s2).item())
-        self.assertEqual(-1, self.bm.objective(s1, s3))
+    def test_estimate_beta(self):
+        spins = torch.tensor(
+            [[1, -1, 1, 1], [-1, -1, 1, 1], [1, -1, -1, 1], [1, 1, 1, -1]]
+        )
+        bqm = BinaryQuadraticModel.from_ising(*self.bm.to_ising(1))
+        self.assertEqual(
+            1.0 / mple(bqm, (spins.numpy(), "dbac"))[0],
+            self.bm.estimate_beta(spins),
+        )
+
+    def test_pad(self):
+        grbm = GRBM([0, 1, 2], [(0, 1), (0, 2), (1, 2)], [1])
+        x = torch.zeros((99, 2))
+        padded = grbm._pad(x)
+        self.assertTrue(padded[:, 1].isnan().all())
+
+    def test_compute_effective_field(self):
+        grbm = GRBM([0, 1, 2], [(0, 1), (0, 2), (1, 2)], [2])
+        #         (0.13)
+        # Model: 2 ----- 0
+        #         \      |
+        #  (-0.17) \     |  (-0.7)
+        #           \ 1 /
+        # effective field = quadratic(0,1) + quadratic(0,2) + linear(2)
+        #                 = -0.13 - 0.17 + 0.4 = 0.1
+        grbm._linear.data = torch.tensor([-0.1, -0.2, 0.4])
+        grbm._quadratic.data = torch.tensor([-0.7, 0.13, -0.17])
+        padded = torch.tensor([[-1.0, 1.0, float("nan")]])
+        h_eff = grbm._compute_effective_field(padded)
+        self.assertAlmostEqual(h_eff.item(), 0.1)
+
+    def test_compute_expectation_disconnected(self):
+        grbm = GRBM(list("acb"), [("a", "b"), ("a", "c"), ("b", "c")], ["c"])
+        #         (0.13)
+        # Model: c ----- a
+        #         \      |
+        #  (-0.17) \     |  (-0.7)
+        #           \ b /
+        grbm._linear.data = torch.tensor([-0.1, 0.4, -0.2])
+        grbm._quadratic.data = torch.tensor([-0.7, 0.13, -0.17])
+        obs = torch.tensor([[-1.0, 1.0]])
+        expected = grbm._compute_expectation_disconnected(obs).tolist()
+        # effective field = -quadratic(a,c) + quadratic(b,c) + linear(c)
+        #                 = -0.13 - 0.17 + 0.4 = 0.1
+        # expectation = tanh(effective field) = tanh(0.1)
+        torch.testing.assert_close(expected, [[-1.0, torch.tanh(torch.tensor(-0.1)).item(), 1.0]])
 
     def test_sufficient_statistics(self):
-        c_answer_0 = [1, 1, 1, 1]
-        c_answer_1 = [1, 1, 1, 1]
-        c_answer_2 = [-1, 1, -1, -1]
+        # Model for reference:
+        #       a
+        #     / | \
+        #    b--c  d
+        # Edge list for reference:
+        # [["a", "b"], ["a", "c"], ["a", "d"], ["b", "c"]]
+        t0 = self.bm.sufficient_statistics(self.ones)
+        self.assertListEqual(t0.tolist(), [[1] * 8])
 
-        m0, c0 = self.bm.sufficient_statistics(self.ones)
-        self.assertListEqual(m0.tolist(), [1, 1, 1, 1])
-        self.assertListEqual(c0.tolist(), c_answer_0)
+        t1 = self.bm.sufficient_statistics(torch.vstack([self.ones, self.mones]))
+        self.assertListEqual(t1.tolist(), [[1] * 8, [-1] * 4 + [1] * 4])
 
-        m1, c1 = self.bm.sufficient_statistics(torch.vstack([self.ones, self.mones]))
-        self.assertListEqual(m1.tolist(), [0] * 4)
-        self.assertListEqual(c1.tolist(), c_answer_1)
-
-        m2, c2 = self.bm.sufficient_statistics(self.pmones)
-        self.assertEqual(m2.tolist(), [1, -1, 1, -1])
-        self.assertEqual(c2.tolist(), c_answer_2)
-
-    def test_gradient(self):
-        s1 = self.ones
-        s2 = self.pmones
-        kld = self.bm.objective(s1, s2)
-        kld.backward()
-        m_1, c_1 = self.bm.sufficient_statistics(s1)
-        m_2, c_2 = self.bm.sufficient_statistics(s2)
-        self.assertListEqual(self.bm.h.grad.tolist(), (m_1 - m_2).tolist())
-        self.assertListEqual(self.bm.J.grad.tolist(), (c_1 - c_2).tolist())
+        t2 = self.bm.sufficient_statistics(self.pmones)
+        # 1 -1 1 -1
+        # d  b a  c
+        self.assertEqual(t2.tolist(), [[1, -1, 1, -1, -1, -1, 1, 1]])
 
     def test_interactions(self):
+        # Model for reference:
+        #       a
+        #     / | \
+        #    b--c  d
+        # Edge list for reference:
+        # [["a", "b"], ["a", "c"], ["a", "d"], ["b", "c"]]
         self.assertListEqual(
+            #                                   d    b    a    c
             self.bm.interactions(torch.tensor([[0.0, 3.0, 2.0, 1.0]])).tolist(),
-            [[0, 0, 0, 6]],
+            [[6.0, 2.0, 0, 3.0]],
         )
         all_ones = [[1, 1, 1, 1]]
         self.assertListEqual(self.bm.interactions(self.ones).tolist(), all_ones)
         self.assertListEqual(self.bm.interactions(self.ones).tolist(), all_ones)
         self.assertListEqual(self.bm.interactions(self.mones).tolist(), all_ones)
-        mpmm = [[-1, 1, -1, -1]]
-        self.assertListEqual(self.bm.interactions(self.pmones).tolist(), mpmm)
-        self.assertListEqual(self.bm.interactions(self.mpones).tolist(), mpmm)
+        # d  b a  c
+        # 1 -1 1 -1
+        mmpp = [[-1.0, -1, 1, 1]]
+        self.assertListEqual(self.bm.interactions(self.pmones).tolist(), mmpp)
+        #  d b  a c
+        # -1 1 -1 1
+        self.assertListEqual(self.bm.interactions(self.mpones).tolist(), mmpp)
 
-    def test_ising(self):
-        with self.subTest("Unbounded weight range"):
-            h_true = torch.tensor([-3, 0, 1, 3.0])
-            J_true = torch.tensor([-1, 1, 2.0, 0])
+    def test_to_ising(self):
+        h_true = torch.tensor([-3, 0, 1, 3.0])
+        J_true = torch.tensor([-1, 1, 2.0, 0])
+        self.bm._linear.data = h_true
+        self.bm._quadratic.data = J_true
 
-            self.bm.h.data = h_true
-            self.bm.J.data = J_true
-            h, J = self.bm.ising
-            self.assertListEqual(h, h_true.tolist())
+        with self.subTest("Ising dictionaries without unbounded bias ranges"):
+            h, J = self.bm.to_ising(1)
+            h_list = list(h.values())
+            J_list = [J[a, b] for a, b in self.edges]
 
-            self.assertListEqual([J[a, b] for a, b in self.edges], J_true.tolist())
+            self.assertListEqual(h_list, h_true.tolist())
+            self.assertListEqual(J_list, J_true.tolist())
 
-        with self.subTest("sparse bounded weight range"):
-            hr = [-1, 2.0]
-            jr = [-3, 4.0]
-            bm = GRBM(
-                self.n,
-                *torch.tensor(self.edges).mT,
-                h_range=hr,
-                j_range=jr,
-            )
-            bm.h.data = torch.tensor([-123, 0, 0, 567.0])
-            bm.J.data = torch.tensor([5555, -333.3, 0, 0])
-            h, J = bm.ising
+        with self.subTest("Ising dictionaries with bounded bias ranges"):
+            h, J = self.bm.to_ising(1, [-0.1, 1.5], [-0.05, 3])
+            h_list = list(h.values())
+            J_list = [J[a, b] for a, b in self.edges]
 
-            self.assertEqual(min(h), hr[0])
-            self.assertEqual(max(h), hr[1])
+            for x_true, x_observed in zip([-0.1, 0, 1, 1.5], h_list):
+                self.assertAlmostEqual(x_true, x_observed)
+            for x_true, x_observed in zip([-0.05, 1, 2, 0], J_list):
+                self.assertAlmostEqual(x_true, x_observed)
 
-            self.assertEqual(min(J.values()), jr[0])
-            self.assertEqual(max(J.values()), jr[1])
+    def test_approximate_expectation_sampling(self):
+        grbm = GRBM(list("acb"), [("a", "b"), ("a", "c"), ("b", "c")], ["c"])
+        #         (0.13)
+        # Model: c ----- a
+        #         \      |
+        #  (-0.17) \     |  (-0.7)
+        #           \ b /
+        grbm._linear.data = torch.tensor([-0.1, 0.4, -0.2])
+        grbm._quadratic.data = torch.tensor([-0.7, 0.13, -0.17])
+        obs = torch.tensor([[-1.0, 1.0], [-1.0, -1.0]])
+        sampler = IdentitySampler()
+        prefactor = 999
 
-    def test_constructor(self):
-        self.assertRaises(ValueError, GRBM, 2, torch.tensor([0, 1]), torch.tensor([3]))
-        self.assertRaises(
-            ValueError, GRBM, 2, torch.tensor([0, 1]), torch.tensor([4, 5])
+        fake_samples = ([[-1], [1]], ["c"])
+        expectation = grbm._approximate_expectation_sampling(
+            obs, sampler, prefactor, sample_kwargs=dict(initial_states=fake_samples)).tolist()
+        self.assertListEqual(expectation, [[-1, 0.0, 1], [-1, 0.0, -1]])
+
+        fake_samples = ([[1], [1]], ["c"])
+        expectation = grbm._approximate_expectation_sampling(
+            obs, sampler, prefactor, sample_kwargs=dict(initial_states=fake_samples)).tolist()
+        self.assertListEqual(expectation, [[-1, 1, 1.0], [-1, 1, -1.0]])
+
+    def test_sampleset_to_tensor(self):
+        grbm = GRBM(list("cabd"), ["ab", "ac", "bc"])
+        bogus_energy = [999] * 3
+        spins_in = [[1, -1, 1, 1], [1, 1, 1, 1], [1, 1, 1, 1]]
+        ss = SampleSet.from_samples((spins_in, list("dbca")), SPIN, bogus_energy)
+        spins = grbm.sampleset_to_tensor(ss)
+        self.assertTupleEqual((3, 4), tuple(spins.shape))
+        self.assertIsInstance(spins, torch.Tensor)
+        # Test variable ordering is respected
+        self.assertListEqual(
+            spins.tolist(), [[1, 1, -1, 1], [1, 1, 1, 1], [1, 1, 1, 1]]
         )
 
     def test_sample(self):
-        kwargs = dict(initial_states=[[1, 1, 1, 1], [1, 1, 1, 1], [-1, -1, 1, -1]])
-        spins = self.bm.sample(IdentitySampler(), **kwargs)
+        grbm = GRBM(list("abcd"), [("a", "b")])
+        spins = grbm.sample(
+            IdentitySampler(),
+            prefactor=1,
+            linear_range=None, quadratic_range=None,
+            sample_params=dict(
+                initial_states=([[1, 1, 1, 1], [1, 1, 1, 1], [-1, -1, 1, -1]], "abcd")
+            ),
+        )
         self.assertTupleEqual((3, 4), tuple(spins.shape))
         self.assertIsInstance(spins, torch.Tensor)
+
+    def test_objective(self):
+        # Create a triangle graph with an additional dangling vertex
+        self.nodes = list("abcd")
+        self.edges = [["a", "b"], ["a", "c"], ["a", "d"], ["b", "c"]]
+        self.n = 4
+
+        # Manually set the parameter weights for testing
+        dtype = torch.float32
+        h = [0.0, 1, 2, 3]
+
+        grbm = GRBM(self.nodes, self.edges)
+        grbm._linear.data = torch.tensor(h, dtype=dtype)
+        grbm._quadratic.data = torch.tensor([1, 2, 3, 6], dtype=dtype)
+
+        # Test the gradient matches
+        ones = torch.ones((1, 4))
+        mones = -ones
+        with self.subTest("Test gradients"):
+            obj = grbm.quasi_objective(ones, mones, kind="exact-disc")
+            obj.backward()
+            t1 = grbm.sufficient_statistics(ones)
+            t2 = grbm.sufficient_statistics(mones)
+            grad_auto = grbm._linear.grad.tolist() + grbm._quadratic.grad.tolist()
+            self.assertListEqual(grad_auto, (t1.mean(0) - t2.mean(0)).tolist())
+
+        pmones = torch.tensor([[1, -1, 1, -1]], dtype=dtype)
+        mpones = torch.tensor([[-1, 1, -1, 1]], dtype=dtype)
+        with self.subTest("Test objective value matches"):
+            s1 = torch.vstack([ones, ones, ones, pmones])
+            s2 = torch.vstack([ones, ones, ones, mpones])
+            s3 = torch.vstack([s2, s2])
+            self.assertEqual(-1, grbm.quasi_objective(s1, s2, kind="exact-disc").item())
+            self.assertEqual(-1, grbm.quasi_objective(s1, s3, kind="exact-disc"))
 
 
 if __name__ == "__main__":
