@@ -22,7 +22,8 @@ if TYPE_CHECKING:
 
 
 def sampleset_to_tensor(
-        ordered_vars: list, sample_set: SampleSet, device: torch.device = None) -> torch.Tensor:
+    ordered_vars: list, sample_set: SampleSet, device: torch.device | None = None
+) -> torch.Tensor:
     """Converts a ``dimod.SampleSet`` to a ``torch.Tensor``.
 
     Args:
