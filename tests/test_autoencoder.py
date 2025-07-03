@@ -52,12 +52,25 @@ class TestDiscreteAutoEncoder(unittest.TestCase):
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 return x * 20 - 10
 
+        encoder = Encoder()
         decoder = torch.nn.Linear(latent_features, input_features)
 
+        self.autoencoder = DiscreteAutoEncoder(encoder, decoder)
+        # Let's make sure that indeed the maps are correct:
+        _, discretes, _ = self.autoencoder(self.data, n_samples=1)
+        discretes = discretes.squeeze(1)
+        # map [1, 1] to [1, 1]:
+        np.testing.assert_array_almost_equal(np.array([1, 1]), discretes[0].numpy())
+        # map [1, 0] to [1, -1]:
+        np.testing.assert_array_almost_equal(np.array([1, -1]), discretes[1].numpy())
+        # map [0, 0] to [-1, -1]:
+        np.testing.assert_array_almost_equal(np.array([-1, -1]), discretes[2].numpy())
+        # map [0, 1] to [-1, 1]:
+        np.testing.assert_array_almost_equal(np.array([-1, 1]), discretes[3].numpy())
+
         self.boltzmann_machine = GraphRestrictedBoltzmannMachine(
-            num_nodes=2, edge_idx_i=torch.tensor([0]), edge_idx_j=torch.tensor([1])
+            nodes=(0, 1), edges=((0, 1),)
         )
-        self.autoencoder = DiscreteAutoEncoder(Encoder(), decoder)
 
         self.sampler = SimulatedAnnealingSampler()
 
@@ -74,14 +87,22 @@ class TestDiscreteAutoEncoder(unittest.TestCase):
                 self.data, n_samples=n_samples
             )
             true_data = self.data.unsqueeze(1).repeat(1, n_samples, 1)
+
+            # Measure the reconstruction loss
             loss = torch.nn.functional.mse_loss(reconstructed_data, true_data)
-            loss += 1e-1 * pseudo_kl_divergence_loss(
+
+            discretes = discretes.reshape(discretes.shape[0], -1)
+            latents = latents.reshape(latents.shape[0], -1)
+            kl_loss = pseudo_kl_divergence_loss(
                 discretes,
                 latents,
                 self.boltzmann_machine,
                 self.sampler,
                 dict(num_sweeps=10, seed=1234, num_reads=100),
-            )
+            ).mean()  # the tensor is tensor([number]), so the mean extracts the number
+            # TODO: discuss with Kevin, how do I get a number tensor, i.e.,
+            # tensor(number) instead of the tensor([number])?
+            loss += 1e-1 * kl_loss
             optimiser.zero_grad()
             loss.backward()
             optimiser.step()
@@ -95,12 +116,12 @@ class TestDiscreteAutoEncoder(unittest.TestCase):
         # Furthermore, the GRBM should learn that all spin strings of length 2 are
         # equally likely, so the h and J parameters should be close to 0:
         np.testing.assert_almost_equal(
-            self.boltzmann_machine.h.detach().numpy(),
+            self.boltzmann_machine.linear.detach().numpy(),
             np.zeros(2),
             decimal=1,
         )
         np.testing.assert_almost_equal(
-            self.boltzmann_machine.J.detach().numpy(),
+            self.boltzmann_machine.quadratic.detach().numpy(),
             np.zeros(1),
             decimal=1,
         )

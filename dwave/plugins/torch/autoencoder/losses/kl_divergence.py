@@ -12,10 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from typing import Optional
+
 import torch
 from dimod import Sampler
 
-from dwave.plugins.torch.boltzmann_machine import AbstractBoltzmannMachine
+from dwave.plugins.torch.boltzmann_machine import GraphRestrictedBoltzmannMachine
 
 __all__ = ["pseudo_kl_divergence_loss"]
 
@@ -23,9 +25,12 @@ __all__ = ["pseudo_kl_divergence_loss"]
 def pseudo_kl_divergence_loss(
     spins: torch.Tensor,
     logits: torch.Tensor,
-    boltzmann_machine: AbstractBoltzmannMachine,
+    boltzmann_machine: GraphRestrictedBoltzmannMachine,
     sampler: Sampler,
-    sampler_kwargs: dict,
+    sample_kwargs: dict,
+    prefactor: Optional[float] = None,
+    linear_range: Optional[tuple[float, float]] = None,
+    quadratic_range: Optional[tuple[float, float]] = None,
 ):
     """
     A pseudo Kullback-Leibler divergence loss function for a discrete autoencoder with a
@@ -41,24 +46,42 @@ def pseudo_kl_divergence_loss(
             representation.
         logits (torch.Tensor): A tensor of logits of shape (batch_size, n_spins). These
             logits are the raw output of the encoder.
-        boltzmann_machine (AbstractBoltzmannMachine): An instance of a Boltzmann
+        boltzmann_machine (GraphRestrictedBoltzmannMachine): An instance of a Boltzmann
             machine.
         sampler (Sampler): A sampler used for generating samples.
-        sampler_kwargs (dict): Additional keyword arguments for the ``sampler.sample``
+        sample_kwargs (dict): Additional keyword arguments for the ``sampler.sample``
             method.
+        prefactor (float, optional): A scaling applied to the Hamiltonian weights
+            (linear and quadratic weights). When None, no scaling is applied. Defaults
+            to None.
+        linear_range (tuple[float, float], optional): Linear weights are clipped to
+            ``linear_range`` prior to sampling. This clipping occurs after the
+            ``prefactor`` scaling has been applied. When None, no clipping is applied.
+            Defaults to None.
+        quadratic_range (tuple[float, float], optional): Quadratic weights are clipped
+            to ``quadratic_range`` prior to sampling. This clipping occurs after the
+            ``prefactor`` scaling has been applied. When None, no clipping is applied.
+            Defaults to None.
 
     Returns:
         torch.Tensor: The computed pseudo KL divergence loss.
     """
     samples = boltzmann_machine.sample(
-        sampler=sampler, device=spins.device, **sampler_kwargs
+        sampler=sampler,
+        device=spins.device,
+        prefactor=prefactor if prefactor is not None else 1.0,
+        linear_range=linear_range,
+        quadratic_range=quadratic_range,
+        sample_params=sample_kwargs,
     )
     probabilities = torch.sigmoid(logits)
     entropy_of_encoder = torch.nn.functional.binary_cross_entropy_with_logits(
         logits, probabilities
     )
-    cross_entropy = torch.mean(boltzmann_machine(spins)) - torch.mean(
-        boltzmann_machine(samples)
+    cross_entropy = boltzmann_machine.quasi_objective(
+        spins,
+        samples,
+        kind="exact-disc",
     )
     pseudo_kl_divergence = cross_entropy - entropy_of_encoder
     return pseudo_kl_divergence
