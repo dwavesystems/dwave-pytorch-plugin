@@ -32,7 +32,7 @@ def run(use_qpu: bool, num_reads: int, batch_size: int, n_iterations: int, fully
         fully_visible (bool): Flag indicating whether the model should be fully visible.
     """
     if use_qpu:
-        sampler = DWaveSampler(solver="Advantage2_prototype2.6")
+        sampler = DWaveSampler(solver="Advantage2_system1.3")
         zephyr_grid_size = sampler.properties['topology']['shape'][0]
         G = sampler.to_networkx_graph()
         sample_kwargs = dict(
@@ -68,6 +68,7 @@ def run(use_qpu: bool, num_reads: int, batch_size: int, n_iterations: int, fully
     if fully_visible:
         hidden_nodes = None
         n_vis = G.number_of_nodes()
+        kind = None
     else:
         # Use a four-colouring of the Zephyr graph to determine a set of conditionally-independent
         # nodes to define as hidden units.
@@ -76,6 +77,7 @@ def run(use_qpu: bool, num_reads: int, batch_size: int, n_iterations: int, fully
         hidden_nodes = [q for q, c in qubit_colour.items() if c == 0]
         n_hid = len(hidden_nodes)
         n_vis = G.number_of_nodes() - n_hid
+        kind = "sampling"
 
     # Generate fake data to fit the Boltzmann machine to
     # Make sure ``x`` is of type float
@@ -103,7 +105,7 @@ def run(use_qpu: bool, num_reads: int, batch_size: int, n_iterations: int, fully
         # Compute a quasi-objective---this quasi-objective yields the same gradient as the negative
         # log likelihood of the model
         quasi = grbm.quasi_objective(
-            x, s, kind="sampling", sampler=sampler, sample_kwargs=sample_kwargs,
+            x, s, kind=kind, sampler=sampler, sample_kwargs=sample_kwargs,
             prefactor=prefactor, linear_range=h_range, quadratic_range=j_range
         )
 

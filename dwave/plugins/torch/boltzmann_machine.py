@@ -54,6 +54,10 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         edges (Iterable[tuple[Hashable, Hashable]]): List of edges.
         hidden_nodes (Iterable[Hashable], optional): List of hidden nodes. Each hidden node should
             also be listed in the input ``nodes``.
+        linear (dict[tuple[Hashable], float], optional): A dictionary mapping from nodes of the
+            model to its corresponding linear bias.
+        quadratic (dict[tuple[Hashable, Hashable], float]): A dictionary mapping from edges of the
+            model to its corresponding quadratic bias.
     """
 
     def __init__(
@@ -61,11 +65,13 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         nodes: Iterable[Hashable],
         edges: Iterable[tuple[Hashable, Hashable]],
         hidden_nodes: Optional[Iterable[Hashable]] = None,
+        linear: Optional[dict[Hashable, float]] = None,
+        quadratic: Optional[dict[tuple[Hashable, Hashable], float]] = None,
     ) -> None:
         super().__init__()
 
         self._nodes = list(nodes)
-        self._edges = list(edges)
+        self._edges = list(map(tuple, edges))
 
         self._n_nodes = len(self._nodes)
         self._n_edges = len(self._edges)
@@ -73,13 +79,23 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         self._idx_to_node = {i: v for i, v in enumerate(self._nodes)}
         self._node_to_idx = {v: i for i, v in self._idx_to_node.items()}
 
+        self._idx_to_edge = {i: e for i, e in enumerate(self._edges)}
+        self._edge_to_idx = {e: i for i, e in self._idx_to_edge.items()}
+
         self._linear = torch.nn.Parameter(0.05 * (2 * torch.rand(self._n_nodes) - 1))
         self._quadratic = torch.nn.Parameter(5.0 * (2 * torch.rand(self._n_edges) - 1))
 
         edge_idx_i = torch.tensor([self._node_to_idx[i] for i, _ in self._edges])
         edge_idx_j = torch.tensor([self._node_to_idx[j] for _, j in self._edges])
+
         self.register_buffer("_edge_idx_i", edge_idx_i)
         self.register_buffer("_edge_idx_j", edge_idx_j)
+
+        # Use initial weights if provided
+        if linear is not None:
+            self.set_linear(linear)
+        if quadratic is not None:
+            self.set_quadratic(quadratic)
 
         if hidden_nodes is None:
             self._hidden_nodes = []
@@ -88,6 +104,30 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         # NOTE: `_setup_hidden` must be invoked as the last step as it depends on properties
         #     defined above
         self._setup_hidden()
+
+    def set_linear(self, linear: dict[tuple[Hashable], float]) -> None:
+        """Set linear biases of the model.
+
+        Args:
+            linear (dict[tuple[Hashable], float]): A dictionary mapping from nodes of the model to
+                its corresponding linear bias. Not all linear biases need to be set; nodes without a
+                mapping will default to its initialized values.
+        """
+        for node, bias in linear.items():
+            idx = self.node_to_idx[node]
+            self._linear.data[idx] = bias
+
+    def set_quadratic(self, quadratic: dict[tuple[Hashable, Hashable], float]) -> None:
+        """Set quadratic biases of the model.
+
+        Args:
+            quadratic (dict[tuple[Hashable, Hashable], float]): A dictionary mapping from edges of
+                the model to its corresponding quadratic bias. Not all quadratic biases need to be
+                set; edges without a mapping will default to its initialized values.
+        """
+        for (u, v), bias in quadratic.items():
+            idx = self._edge_to_idx.get((u, v), self._edge_to_idx.get((v, u)))
+            self._quadratic.data[idx] = bias
 
     def _setup_hidden(self):
         """Preprocess some indexes to enable vectorized computation of effective fields of hidden
@@ -291,7 +331,7 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         self,
         s_observed: torch.Tensor,
         s_model: torch.Tensor,
-        kind: Literal["sampling", "exact-disc"],
+        kind: Optional[Literal["sampling", "exact-disc"]] = None,
         *,
         prefactor: Optional[float] = None,
         linear_range: Optional[tuple[float, float]] = None,
@@ -330,34 +370,33 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
             torch.Tensor: Scalar difference of the average energy of data and model whose gradients
             are equivalent to the gradients of the negative log likelihood.
         """
-        if kind == "exact-disc":
-            if sampler or sample_kwargs:
-                warning_msg = (
-                    "`sampler` and `sample_kwargs` are not used "
-                    f"({sampler}, {sample_kwargs})"
+        if self.hidden_nodes:
+            if kind == "exact-disc":
+                if sampler or sample_kwargs:
+                    warning_msg = (
+                        "`sampler` and `sample_kwargs` are not used "
+                        f"({sampler}, {sample_kwargs})"
+                    )
+                    warnings.warn(warning_msg)
+                if self._connected_hidden:
+                    err_msg = (
+                        'The "exact-disc" method requires hidden units to be disconnected from '
+                        'each other.'
+                    )
+                    raise ValueError(err_msg)
+                obs = self._compute_expectation_disconnected(s_observed)
+            elif kind == "sampling":
+                obs = self._approximate_expectation_sampling(
+                    s_observed, sampler, prefactor, linear_range, quadratic_range, sample_kwargs
                 )
-                warnings.warn(warning_msg)
-            if self._connected_hidden:
-                err_msg = (
-                    'The "exact-disc" method requires hidden units to be disconnected from '
-                    "each other."
-                )
+            else:
+                err_msg = f'Invalid kind ({kind}). Should be one of "sampling" or "exact-disc"'
                 raise ValueError(err_msg)
-            obs = self._compute_expectation_disconnected(s_observed)
-        elif kind == "sampling":
-            obs = self._approximate_expectation_sampling(
-                s_observed,
-                sampler,
-                prefactor,
-                linear_range,
-                quadratic_range,
-                sample_kwargs,
-            )
         else:
-            err_msg = (
-                f'Invalid kind ({kind}). Should be one of "sampling" or "exact-disc"'
-            )
-            raise ValueError(err_msg)
+            obs = s_observed
+            if kind is not None:
+                raise ValueError(
+                    f"`kind` {kind} should not be specified if the model is fully visible.")
         return (
             self.sufficient_statistics(obs).mean(0, True)
             - self.sufficient_statistics(s_model).mean(0, True)

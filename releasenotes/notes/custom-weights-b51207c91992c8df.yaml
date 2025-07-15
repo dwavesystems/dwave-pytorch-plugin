@@ -1,0 +1,5 @@
+---
+features:
+  - Support custom weight initialization and setting.
+fixes:
+  - Make ``GraphRestrictedBoltzmannMachine.quasi_objective``'s argument ``kind`` optional.
