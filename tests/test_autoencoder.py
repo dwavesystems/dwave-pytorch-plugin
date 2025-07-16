@@ -15,20 +15,17 @@
 import unittest
 
 import numpy as np
+from parameterized import parameterized
 import torch
 
 from dwave.plugins.torch.autoencoder import DiscreteAutoEncoder
-from dwave.plugins.torch.autoencoder.losses.kl_divergence import (
-    pseudo_kl_divergence_loss,
-)
+from dwave.plugins.torch.autoencoder.losses.kl_divergence import pseudo_kl_divergence_loss
 from dwave.plugins.torch.boltzmann_machine import GraphRestrictedBoltzmannMachine
 from dwave.samplers import SimulatedAnnealingSampler
 
 
 class TestDiscreteAutoEncoder(unittest.TestCase):
-    """
-    Tests the DiscreteAutoEncoder with dummy data
-    """
+    """Tests the DiscreteAutoEncoder with dummy data"""
 
     def setUp(self):
         torch.manual_seed(1234)
@@ -52,10 +49,20 @@ class TestDiscreteAutoEncoder(unittest.TestCase):
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 return x * 20 - 10
 
-        encoder = Encoder()
-        decoder = torch.nn.Linear(latent_features, input_features)
+        self.encoder = Encoder()
+        self.decoder = torch.nn.Linear(latent_features, input_features)
 
-        self.autoencoder = DiscreteAutoEncoder(encoder, decoder)
+        self.autoencoder = DiscreteAutoEncoder(self.encoder, self.decoder)
+
+        self.boltzmann_machine = GraphRestrictedBoltzmannMachine(
+            nodes=(0, 1), edges=((0, 1),)
+        )
+
+        self.sampler = SimulatedAnnealingSampler()
+
+
+    def test_mappings(self):
+        """Test the mapping between data and logits."""
         # Let's make sure that indeed the maps are correct:
         _, discretes, _ = self.autoencoder(self.data, n_samples=1)
         discretes = discretes.squeeze(1)
@@ -68,13 +75,9 @@ class TestDiscreteAutoEncoder(unittest.TestCase):
         # map [0, 1] to [-1, 1]:
         np.testing.assert_array_almost_equal(np.array([-1, 1]), discretes[3].numpy())
 
-        self.boltzmann_machine = GraphRestrictedBoltzmannMachine(
-            nodes=(0, 1), edges=((0, 1),)
-        )
-
-        self.sampler = SimulatedAnnealingSampler()
 
     def test_train(self):
+        """Test training simple dataset."""
         optimiser = torch.optim.SGD(
             list(self.autoencoder.parameters())
             + list(self.boltzmann_machine.parameters()),
@@ -82,7 +85,7 @@ class TestDiscreteAutoEncoder(unittest.TestCase):
             momentum=0.9,
         )
         n_samples = 1
-        for _ in range(100):
+        for _ in range(1000):
             reconstructed_data, discretes, latents = self.autoencoder(
                 self.data, n_samples=n_samples
             )
@@ -125,6 +128,38 @@ class TestDiscreteAutoEncoder(unittest.TestCase):
             np.zeros(1),
             decimal=1,
         )
+
+    @parameterized.expand([
+        (
+            1,
+            torch.tensor([[[ 1.,  1.]], [[ 1., -1.]], [[-1., -1.]], [[-1.,  1.]]])
+        ),
+        (
+            5,
+            torch.tensor([[[ 1.,  1.]] * 5, [[ 1., -1.]] * 5, [[-1., -1.]] * 5, [[-1.,  1.]] * 5])
+        ),
+    ])
+    def test_latent_to_discrete(self, n_samples, expected):
+        """Test the latent_to_discrete default method."""
+        logits = self.encoder(self.data)
+        discretes = self.autoencoder.latent_to_discrete(logits, n_samples)
+        assert torch.equal(discretes, expected)
+
+    @parameterized.expand([0, 1, 5, 1000])
+    def test_forward(self, n_samples):
+        """Test the forward method."""
+        logits = self.encoder(self.data)
+        discretes = self.autoencoder.latent_to_discrete(logits, n_samples)
+        reconstructed_x = self.decoder(discretes)
+
+        expected_reconstructed_x, expected_discretes, expected_logits = self.autoencoder.forward(
+            x=self.data,
+            n_samples=n_samples
+        )
+
+        assert torch.equal(reconstructed_x, expected_reconstructed_x)
+        assert torch.equal(discretes, expected_discretes)
+        assert torch.equal(logits, expected_logits)
 
 
 if __name__ == "__main__":

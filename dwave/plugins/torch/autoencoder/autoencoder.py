@@ -25,6 +25,7 @@
 #
 
 from collections.abc import Callable
+from typing import Optional
 
 import torch
 
@@ -70,7 +71,7 @@ class DiscreteAutoEncoder(torch.nn.Module):
         self,
         encoder: torch.nn.Module,
         decoder: torch.nn.Module,
-        latent_to_discrete: Callable[[torch.Tensor, int], torch.Tensor] | None = None,
+        latent_to_discrete: Optional[Callable[[torch.Tensor, int], torch.Tensor]] = None,
     ):
         super().__init__()
         self.encoder = encoder
