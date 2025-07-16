@@ -5,7 +5,3 @@ dwave-hybrid==0.6.13
 
 # Development requirements
 reno==4.1.0
-
-# Examples requirements
-torchvision==0.22.0
-matplotlib==3.10.1
