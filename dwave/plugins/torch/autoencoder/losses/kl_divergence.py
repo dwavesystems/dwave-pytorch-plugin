@@ -81,7 +81,6 @@ def pseudo_kl_divergence_loss(
     cross_entropy = boltzmann_machine.quasi_objective(
         spins,
         samples,
-        kind="exact-disc",
     )
     pseudo_kl_divergence = cross_entropy - entropy_of_encoder
     return pseudo_kl_divergence
