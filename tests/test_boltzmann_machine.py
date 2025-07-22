@@ -171,7 +171,6 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         grbm._quadratic.data = torch.tensor([-.15, -0.7, 0.15, 0.13, -0.17 ])
         padded = torch.tensor([[-1.0, float("nan"), float("nan"), 1.0]])
         h_eff = grbm._compute_effective_field(padded)
-        print(h_eff.data[0])
         self.assertTrue(torch.allclose(h_eff.data, torch.tensor([-0.5000, 0.1000]), atol=1e-6))
 
     def test_compute_expectation_disconnected(self):
