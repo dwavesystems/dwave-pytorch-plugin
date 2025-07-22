@@ -135,7 +135,7 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
 
     def test_compute_effective_field(self):
         grbm = GRBM([0, 1, 2], [(0, 1), (0, 2), (1, 2)], [2])
-        # Note : In the digram bellow linear biases are shown using  <>
+        # Note : In the diagram below linear biases are shown using  <>
         #        quadratic biases using (), and spin value of visibles using []
         #               (0.13)
         # Model: 2 <.4> ------- 0 [-1]
