@@ -133,15 +133,21 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         """Preprocess some indexes to enable vectorized computation of effective fields of hidden
         units."""
         self._connected_hidden = any(
-            a in self.hidden_nodes and b in self.hidden_nodes for a, b in self.edges)
+            a in self.hidden_nodes and b in self.hidden_nodes for a, b in self.edges
+        )
         if self._connected_hidden:
-            err_message = "Current implementation does not support intrahidden-unit connections."
+            err_message = (
+                "Current implementation does not support intrahidden-unit connections."
+            )
             raise NotImplementedError(err_message)
 
-        visible_idx = torch.tensor([self._node_to_idx[v]
-                                    for v in self._nodes if v not in self.hidden_nodes], dtype=int)
+        visible_idx = torch.tensor(
+            [self._node_to_idx[v] for v in self._nodes if v not in self.hidden_nodes],
+            dtype=int,
+        )
         hidden_idx = torch.tensor(
-            [i for i in torch.arange(self._n_nodes) if i not in visible_idx], dtype=int)
+            [i for i in torch.arange(self._n_nodes) if i not in visible_idx], dtype=int
+        )
         self.register_buffer("_visible_idx", visible_idx)
         self.register_buffer("_hidden_idx", hidden_idx)
 
@@ -317,7 +323,8 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         return sample_set
 
     def sampleset_to_tensor(
-            self, sample_set: SampleSet, device: Optional[torch.device] = None) -> torch.Tensor:
+        self, sample_set: SampleSet, device: Optional[torch.device] = None
+    ) -> torch.Tensor:
         """Converts a ``dimod.SampleSet`` to a ``torch.Tensor`` using the node order of the class.
 
         Args:
@@ -342,7 +349,7 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         linear_range: Optional[tuple[float, float]] = None,
         quadratic_range: Optional[tuple[float, float]] = None,
         sampler: Optional[Sampler] = None,
-        sample_kwargs: Optional[dict] = None
+        sample_kwargs: Optional[dict] = None,
     ) -> torch.Tensor:
         """A quasi-objective function with gradients equivalent to the gradients of the
         negative log likelihood.
@@ -432,20 +439,20 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         contribution = padded[:, self._flat_adj] * self._quadratic[self._flat_j_idx]
         cumulative_contribution = contribution.cumsum(1)
         # Don't forget to add the linear fields!
-        h_eff = self._linear[self.hidden_idx] + cumulative_contribution[:, self._bin_idx].diff(
-            dim=1, prepend=torch.zeros(bs, device=padded.device).unsqueeze(1)
-        )
+        h_eff = self._linear[self.hidden_idx] + cumulative_contribution[
+            :, self._bin_idx
+        ].diff(dim=1, prepend=torch.zeros(bs, device=padded.device).unsqueeze(1))
 
         return h_eff
 
     def _approximate_expectation_sampling(
-            self,
-            obs: torch.Tensor,
-            sampler: Sampler,
-            prefactor: float,
-            linear_range: Optional[tuple[float, float]] = None,
-            quadratic_range: Optional[tuple[float, float]] = None,
-            sample_kwargs: Optional[dict] = None
+        self,
+        obs: torch.Tensor,
+        sampler: Sampler,
+        prefactor: float,
+        linear_range: Optional[tuple[float, float]] = None,
+        quadratic_range: Optional[tuple[float, float]] = None,
+        sample_kwargs: Optional[dict] = None,
     ) -> torch.Tensor:
         """Approximate expectation of hidden units via sampling.
 
@@ -471,8 +478,11 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         """
         # Create the BQM and remove visible units
         bqm = BinaryQuadraticModel.from_ising(
-            *self.to_ising(prefactor, linear_range, quadratic_range))
-        bqm.remove_variables_from([self.idx_to_node[vidx] for vidx in self.visible_idx.tolist()])
+            *self.to_ising(prefactor, linear_range, quadratic_range)
+        )
+        bqm.remove_variables_from(
+            [self.idx_to_node[vidx] for vidx in self.visible_idx.tolist()]
+        )
 
         # Compute the effective fields for hidden units
         padded = self._pad(obs)
@@ -524,8 +534,10 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
             variables in the model, i.e., number of hidden and visible units.
         """
         if self._connected_hidden:
-            err_msg = ("`_compute_expectation_disconnected` is not applicable when edges exist "
-                       "between hidden units.")
+            err_msg = (
+                "`_compute_expectation_disconnected` is not applicable when edges exist "
+                "between hidden units."
+            )
             raise ValueError(err_msg)
         m = self._pad(obs)
         h_eff = self._compute_effective_field(m)
@@ -592,8 +604,12 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         interactions = self.interactions(x)
         return torch.cat([x, interactions], 1)
 
-    def to_ising(self, prefactor: float, linear_range: Optional[tuple[float, float]] = None,
-                 quadratic_range: Optional[tuple[float, float]] = None) -> tuple[dict, dict]:
+    def to_ising(
+        self,
+        prefactor: float,
+        linear_range: Optional[tuple[float, float]] = None,
+        quadratic_range: Optional[tuple[float, float]] = None,
+    ) -> tuple[dict, dict]:
         """Convert the model to Ising format.
 
         Convert the model to Ising format with scaling (``prefactor``) followed by clipping (if
