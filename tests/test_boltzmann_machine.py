@@ -135,18 +135,43 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
 
     def test_compute_effective_field(self):
         grbm = GRBM([0, 1, 2], [(0, 1), (0, 2), (1, 2)], [2])
-        #         (0.13)
-        # Model: 2 ----- 0
-        #         \      |
-        #  (-0.17) \     |  (-0.7)
-        #           \ 1 /
-        # effective field = quadratic(0,1) + quadratic(0,2) + linear(2)
-        #                 = -0.13 - 0.17 + 0.4 = 0.1
+        # Note : In the diagram below linear biases are shown using  <>
+        #        quadratic biases using (), and spin value of visibles using []
+        #               (0.13)
+        # Model: 2 <.4> ------- 0 [-1]
+        #         \           /
+        #   (-0.17)\         /(-0.7)
+        #           \ 1 [1] /
+        # effective field = quadratic(0,2) * [-1] + quadratic(1,2) * [1]+ linear(2)
+        #                 = 0.13 * [-1] - 0.17 * [1] + 0.4 = 0.1
         grbm._linear.data = torch.tensor([-0.1, -0.2, 0.4])
         grbm._quadratic.data = torch.tensor([-0.7, 0.13, -0.17])
         padded = torch.tensor([[-1.0, 1.0, float("nan")]])
         h_eff = grbm._compute_effective_field(padded)
         self.assertAlmostEqual(h_eff.item(), 0.1)
+
+    def test_compute_effective_field_unordered(self):
+        grbm = GRBM([0, 3, 2, 1], [(1, 3), (0, 1), (0, 3), (0, 2), (1, 2)], [3, 2])
+        # Note : In the digram bellow linear biases are shown using  <>
+        #        quadratic biases using (), and spin value of visibles using []
+        #              (0.13)         (0.15)
+        # Model: 2 <.4> ----- 0 [-1] -------- 3 <-0.2>
+        #         \           |             /
+        #   (-0.17)\          |(-0.7)      / -(0.15)
+        #           \         |           /
+        #            -------  1 [1] ---  /
+
+        # effective field [3] = quadratic(0,3) * [-1] + quadratic(1,3) * [1] + linear(3)
+        #                 =  0.15 * [-1] - 0.15 * [1] - 0.2 = -.5
+
+        # effective field [2] = quadratic(0,2) * [-1] + quadratic(1,2) * [1] + linear(2)
+        #                 =  0.13 * [-1] - 0.17 * [1] + 0.4 = .1
+
+        grbm._linear.data = torch.tensor([-0.1, -0.2, 0.4, 0.2])
+        grbm._quadratic.data = torch.tensor([-.15, -0.7, 0.15, 0.13, -0.17 ])
+        padded = torch.tensor([[-1.0, float("nan"), float("nan"), 1.0]])
+        h_eff = grbm._compute_effective_field(padded)
+        self.assertTrue(torch.allclose(h_eff.data, torch.tensor([-0.5000, 0.1000]), atol=1e-6))
 
     def test_compute_expectation_disconnected(self):
         grbm = GRBM(list("acb"), [("a", "b"), ("a", "c"), ("b", "c")], ["c"])
