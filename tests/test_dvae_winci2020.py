@@ -57,10 +57,12 @@ class TestDiscreteVariationalAutoencoder(unittest.TestCase):
         self.dvae = DVAE(self.encoder, self.decoder)
 
         self.boltzmann_machine = GraphRestrictedBoltzmannMachine(
-            nodes=(0, 1), edges=((0, 1),)
+            nodes=(0, 1), edges=[(0, 1)],
+            linear={0: 0.1, 1: -0.2},
+            quadratic={(0, 1): -1.2},
         )
 
-        self.sampler = SimulatedAnnealingSampler()
+        self.sampler_sa = SimulatedAnnealingSampler()
 
     def test_mappings(self):
         """Test the mapping between data and logits."""
@@ -84,12 +86,12 @@ class TestDiscreteVariationalAutoencoder(unittest.TestCase):
             lr=0.01,
             momentum=0.9,
         )
-        n_samples = 1
+        N_SAMPLES = 1
         for _ in range(1000):
             latents, discretes, reconstructed_data = self.dvae(
-                self.data, n_samples=n_samples
+                self.data, n_samples=N_SAMPLES
             )
-            true_data = self.data.unsqueeze(1).repeat(1, n_samples, 1)
+            true_data = self.data.unsqueeze(1).repeat(1, N_SAMPLES, 1)
 
             # Measure the reconstruction loss
             loss = torch.nn.functional.mse_loss(reconstructed_data, true_data)
@@ -100,7 +102,7 @@ class TestDiscreteVariationalAutoencoder(unittest.TestCase):
                 discretes,
                 latents,
                 self.boltzmann_machine,
-                self.sampler,
+                self.sampler_sa,
                 dict(num_sweeps=10, seed=1234, num_reads=100),
             )
             loss = loss + 1e-1 * kl_loss
