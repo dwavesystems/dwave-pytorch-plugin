@@ -1,0 +1,5 @@
+---
+other:
+  - |
+    Add a directory for models and move ``boltzmann_machine.py``
+    from ``dwave/plugins/torch/`` to ``dwave/plugins/torch/models/``

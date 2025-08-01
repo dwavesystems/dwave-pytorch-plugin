@@ -27,7 +27,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING, Hashable, Iterable, Literal, Optional
+from typing import TYPE_CHECKING, Hashable, Iterable, Literal, Optional, Union, overload
 
 import torch
 
@@ -261,6 +261,12 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         by the model's input ``nodes`` and ``edges``."""
         return torch.cat([self._linear, self._quadratic])
 
+    @overload
+    def sample(self, sampler: Sampler, as_tensor: Literal[True], **kwargs) -> torch.Tensor: ...
+
+    @overload
+    def sample(self, sampler: Sampler, as_tensor: Literal[False], **kwargs) -> SampleSet: ...
+
     def sample(
         self,
         sampler: Sampler,
@@ -270,7 +276,8 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         quadratic_range: Optional[tuple[float, float]] = None,
         device: Optional[torch.device] = None,
         sample_params: Optional[dict] = None,
-    ) -> torch.Tensor:
+        as_tensor: bool = True,
+    ) -> Union[torch.Tensor, SampleSet]:
         """Sample from the Boltzmann machine.
 
         This method samples and converts a sample of spins to tensors and ensures they
@@ -298,17 +305,22 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
                 If ``None`` and data is not a tensor then the result tensor is
                 constructed on the current device.
             sample_params (dict, optional): Parameters of the `sampler.sample` method.
+            as_tensor (bool): Whether to return the sampleset as a tensor.
+                Defaults to ``True``. If ``False`` returns a ``dimod.SampleSet``.
 
         Returns:
-            torch.Tensor: Spins sampled from the model
+            torch.Tensor | SampleSet: Spins sampled from the model
             (shape prescribed by ``sampler`` and ``sample_params``).
         """
         if sample_params is None:
             sample_params = dict()
         h, J = self.to_ising(prefactor, linear_range, quadratic_range)
-        ss = spread(sampler.sample_ising(h, J, **sample_params))
-        spins = self.sampleset_to_tensor(ss, device=device)
-        return spins
+        sample_set = spread(sampler.sample_ising(h, J, **sample_params))
+
+        if as_tensor:
+            return self.sampleset_to_tensor(sample_set, device=device)
+
+        return sample_set
 
     def sampleset_to_tensor(
         self, sample_set: SampleSet, device: Optional[torch.device] = None

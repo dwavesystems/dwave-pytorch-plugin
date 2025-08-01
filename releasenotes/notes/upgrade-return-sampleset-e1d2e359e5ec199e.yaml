@@ -1,0 +1,5 @@
+---
+upgrade:
+  - |
+    Add option to return samples as ``dimod.Sampleset`` from
+    ``GraphRestrictedBoltzmannMachine.sample()``

@@ -11,5 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+#
 
 from dwave.plugins.torch.models.discrete_variational_autoencoder import *
+from dwave.plugins.torch.models.boltzmann_machine import *
