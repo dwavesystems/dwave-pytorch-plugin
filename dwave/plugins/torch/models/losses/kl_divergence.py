@@ -32,8 +32,7 @@ def pseudo_kl_divergence_loss(
     linear_range: Optional[tuple[float, float]] = None,
     quadratic_range: Optional[tuple[float, float]] = None,
 ):
-    """
-    A pseudo Kullback-Leibler divergence loss function for a discrete autoencoder with a
+    """A pseudo Kullback-Leibler divergence loss function for a discrete autoencoder with a
     Boltzmann machine prior.
 
     This is not the true KL divergence, but the gradient of this function is the same as

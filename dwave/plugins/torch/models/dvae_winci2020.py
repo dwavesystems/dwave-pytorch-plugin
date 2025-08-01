@@ -12,12 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# The use of the discrete auto encoder implementations below (including the
+# The use of the discrete autoencoder implementations below (including the
 # DiscreteVariationalAutoencoder) with a quantum computing system is
 # protected by the intellectual property rights of D-Wave Quantum Inc.
 # and its affiliates.
 #
-# The use of the discrete auto encoder implementations below (including the
+# The use of the discrete autoencoder implementations below (including the
 # DiscreteVariationalAutoencoder) with D-Wave's quantum computing
 # system will require access to D-Wave’s LeapTM quantum cloud service and
 # will be governed by the Leap Cloud Subscription Agreement available at:
@@ -123,13 +123,12 @@ class DiscreteVariationalAutoencoder(torch.nn.Module):
     def forward(
         self, x: torch.Tensor, n_samples: int = 1
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Ingests data into the DiscreteVariationalAutoencoder
+        """Ingests data into the :class:`DiscreteVariationalAutoencoder`.
 
         Args:
-            x (torch.Tensor): Input data of shape (batch_size, ...)
+            x (torch.Tensor): Input data of shape (batch_size, ...).
             n_samples (int, optional): Since the ``latent_to_discrete`` map is, in
-                general, "stochastic" (see class documentation for more on this),
+                general, stochastic (see :class:`DiscreteVariationalAutoencoder` for more on this),
                 several different discrete samples can be obtained by applying this map
                 to the same encoded data point. This argument specifies how many such
                 samples are obtained. Defaults to 1.
