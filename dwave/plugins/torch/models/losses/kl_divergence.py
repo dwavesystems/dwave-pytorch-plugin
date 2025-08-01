@@ -17,7 +17,7 @@ from typing import Optional
 import torch
 from dimod import Sampler
 
-from dwave.plugins.torch.boltzmann_machine import GraphRestrictedBoltzmannMachine
+from dwave.plugins.torch.models.boltzmann_machine import GraphRestrictedBoltzmannMachine
 
 __all__ = ["pseudo_kl_divergence_loss"]
 

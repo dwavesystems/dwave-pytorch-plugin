@@ -12,4 +12,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from dwave.plugins.torch.models.dvae_winci2020 import *
+from dwave.plugins.torch.models.discrete_variational_autoencoder import *

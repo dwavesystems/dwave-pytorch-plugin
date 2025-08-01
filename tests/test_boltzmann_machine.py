@@ -17,7 +17,7 @@ import unittest
 import torch
 from dimod import SPIN, BinaryQuadraticModel, IdentitySampler, SampleSet
 
-from dwave.plugins.torch.boltzmann_machine import GraphRestrictedBoltzmannMachine as GRBM
+from dwave.plugins.torch.models.boltzmann_machine import GraphRestrictedBoltzmannMachine as GRBM
 from dwave.system.temperatures import maximum_pseudolikelihood_temperature as mple
 
 

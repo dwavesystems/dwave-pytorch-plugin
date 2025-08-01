@@ -18,7 +18,7 @@ import torch
 from parameterized import parameterized
 
 from dwave.plugins.torch.models.boltzmann_machine import GraphRestrictedBoltzmannMachine
-from dwave.plugins.torch.models.dvae_winci2020 import DiscreteVariationalAutoencoder as DVAE
+from dwave.plugins.torch.models.discrete_variational_autoencoder import DiscreteVariationalAutoencoder as DVAE
 from dwave.plugins.torch.models.losses.kl_divergence import pseudo_kl_divergence_loss
 from dwave.samplers import SimulatedAnnealingSampler
 

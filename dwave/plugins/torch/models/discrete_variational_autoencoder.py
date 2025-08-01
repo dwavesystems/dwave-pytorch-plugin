@@ -69,18 +69,6 @@ class DiscreteVariationalAutoencoder(torch.nn.Module):
             stochasticity. Defaults to None.
     """
 
-    @property
-    def encoder(self):
-        return self._encoder
-
-    @property
-    def decoder(self):
-        return self._decoder
-
-    @property
-    def latent_to_discrete(self):
-        return self._latent_to_discrete
-
     def __init__(
         self,
         encoder: torch.nn.Module,
@@ -119,6 +107,21 @@ class DiscreteVariationalAutoencoder(torch.nn.Module):
                 return one_hots[..., 0] * 2 - 1
 
         self._latent_to_discrete = latent_to_discrete
+
+    @property
+    def encoder(self):
+        """Encoder network that maps image data to latent spinstrings."""
+        return self._encoder
+
+    @property
+    def decoder(self):
+        """Decoder network that maps latent variables to images."""
+        return self._decoder
+
+    @property
+    def latent_to_discrete(self):
+        """Function that maps the output of the encoder to a discrete representation"""
+        return self._latent_to_discrete
 
     def forward(
         self, x: torch.Tensor, n_samples: int = 1

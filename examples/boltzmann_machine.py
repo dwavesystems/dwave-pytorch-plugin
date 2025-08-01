@@ -15,7 +15,7 @@ import torch
 from dwave_networkx import zephyr_coordinates, zephyr_four_color, zephyr_graph
 from torch.optim import SGD
 
-from dwave.plugins.torch.boltzmann_machine import GraphRestrictedBoltzmannMachine as GRBM
+from dwave.plugins.torch.models.boltzmann_machine import GraphRestrictedBoltzmannMachine as GRBM
 from dwave.samplers import SimulatedAnnealingSampler
 from dwave.system import DWaveSampler
 
