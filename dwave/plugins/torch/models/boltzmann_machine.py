@@ -396,6 +396,11 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
                         'each other.'
                     )
                     raise ValueError(err_msg)
+                # NOTE: this method relies on hidden units being disconnected. The calculations
+                # depend on this assumption in **two** ways. The obvious one is marginalization. The
+                # less obvious dependence is the linearity of expectation and sufficient statistics.
+                # Because hidden units are disconnected, we can average their spins before computing
+                # the sufficient statistics, which is then passed into the quasi objective function.
                 obs = self._compute_expectation_disconnected(s_observed)
             elif kind == "sampling":
                 obs = self._approximate_expectation_sampling(
@@ -436,10 +441,10 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         # by the corresponding edges. Transforming this contribution vector by a
         # cumulative sum yields cumulative contributions to effective fields.
         # Differencing removes the extra gobbledygook.
-        contribution = padded[:, self._flat_adj] * self._quadratic[self._flat_j_idx]
+        contribution = padded[:, self._flat_adj] * self._quadratic[self._flat_j_idx].detach()
         cumulative_contribution = contribution.cumsum(1)
         # Don't forget to add the linear fields!
-        h_eff = self._linear[self.hidden_idx] + cumulative_contribution[
+        h_eff = self._linear[self.hidden_idx].detach() + cumulative_contribution[
             :, self._bin_idx
         ].diff(dim=1, prepend=torch.zeros(bs, device=padded.device).unsqueeze(1))
 

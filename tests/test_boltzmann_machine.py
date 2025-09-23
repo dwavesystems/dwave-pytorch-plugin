@@ -168,7 +168,7 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         #                 =  0.13 * [-1] - 0.17 * [1] + 0.4 = .1
 
         grbm._linear.data = torch.tensor([-0.1, -0.2, 0.4, 0.2])
-        grbm._quadratic.data = torch.tensor([-.15, -0.7, 0.15, 0.13, -0.17 ])
+        grbm._quadratic.data = torch.tensor([-.15, -0.7, 0.15, 0.13, -0.17])
         padded = torch.tensor([[-1.0, float("nan"), float("nan"), 1.0]])
         h_eff = grbm._compute_effective_field(padded)
         self.assertTrue(torch.allclose(h_eff.data, torch.tensor([-0.5000, 0.1000]), atol=1e-6))
@@ -322,7 +322,7 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         self.assertEqual(4, len(sampleset.variables))
         self.assertEqual(set(grbm.nodes), set(sampleset.variables))
 
-    def test_objective(self):
+    def test_quasi_objective(self):
         # Create a triangle graph with an additional dangling vertex
         self.nodes = list("abcd")
         self.edges = [["a", "b"], ["a", "c"], ["a", "d"], ["b", "c"]]
@@ -355,6 +355,46 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
             s3 = torch.vstack([s2, s2])
             self.assertEqual(-1, grbm.quasi_objective(s1, s2).item())
             self.assertEqual(-1, grbm.quasi_objective(s1, s3))
+
+    def test_quasi_objective_gradient_hidden_units(self):
+        grbm = GRBM([1, 2, 3],
+                    [(1, 2), (1, 3), (2, 3)],
+                    [1],
+                    {1: 0.2, 2: 0.2, 3: 0.3},
+                    {(1, 2): 0.2, (1, 3): 0.3, (2, 3): 0.6})
+        # Note : In the digram bellow linear biases are shown using  <>
+        #        quadratic biases using ()
+        #                 (0.2)
+        # Model:  v1 <0.2> ----- v2  <0.2>
+        #           \           /
+        #     (0.3)  \         / (0.6)
+        #             \       /
+        #                v3 <0.3>
+        s_observed = torch.tensor([[1.0, -1.0]])
+        s_model = torch.tensor([[1.0, -1.0, 1.0]])
+        quasi = grbm.quasi_objective(s_observed, s_model, "exact-disc")
+        quasi.backward()
+        # Compute gradients manually
+        # Compute unnormalized density
+        #                            h1v1 + h2v2 + h3v3 + J23v2v3 + J12v1v2 + J13v1v3
+        q_plus = torch.exp(-torch.tensor(0.2 + 0.2 - 0.3 - 0.6 + 0.2 - 0.3))
+        q_minus = torch.exp(-torch.tensor(-0.2 - 0.2 + 0.3 - 0.6 + 0.2 - 0.3))
+        # Normalize it
+        z_cond = q_plus + q_minus
+        p_plus = q_plus / z_cond
+        p_minus = q_minus / z_cond
+        # t = sufficient statistics = (v1 v2 v3 v1v2 v1v3 v2v3)
+        t_plus = torch.tensor([1,  1, -1,  1, -1, -1]).float()
+        t_minus = torch.tensor([-1, 1, -1, -1,  1, -1]).float()
+        t_model = torch.tensor([1, -1,  1, -1,  1, -1]).float()
+        # Compute expected stat
+        t_cond = t_plus*p_plus + t_minus*p_minus
+        grad = t_cond - t_model
+        grad_auto = torch.cat([grbm.linear.grad, grbm.quadratic.grad])
+        # NOTE: this test relied on the hidden units being disconnected. This assumption gives rise
+        # to linearity in expectation of sufficient statistics, i.e., average spin, then calculating
+        # the sufficient statistics of the average spins.
+        torch.testing.assert_close(grad, grad_auto)
 
 
 if __name__ == "__main__":

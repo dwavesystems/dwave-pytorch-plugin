@@ -1,0 +1,7 @@
+---
+fixes:
+  - |
+    Fix the (automatic) gradient computation when hidden units are present. The issue was that the
+    parameters, linear and quadratic weights, were used in the marginalization without being
+    detached from the computation graph. The fix was to detach the parameters when computing
+    effective fields.
