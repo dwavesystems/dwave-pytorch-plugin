@@ -1,0 +1,65 @@
+import torch
+
+
+def are_all_spins(x: torch.Tensor) -> bool:
+    """Checks all entries of `x` are one in absolute value.
+
+    Args:
+        x (torch.Tensor): A tensor.
+
+    Returns:
+        bool: indicator for whether all entries of `x` are in ``{-1, 1}``.
+    """
+    return (x.float().abs() == 1).all()
+
+
+def _has_mixed_signs(x: torch.Tensor) -> bool:
+    """Checks whether `x` has both positive and negative values.
+
+    Args:
+        x (torch.Tensor): A tensor to be cast to type float.
+
+    Returns:
+        bool: Indicator for whether `x` consists of both positive and negative values.
+    """
+    return (((x > 0).float().sum() > 0)
+            and
+            ((x < 0).float().sum() > 0))
+
+
+def _has_zeros(x: torch.Tensor) -> bool:
+    """Checks whether `x` has exact zeros.
+
+    Args:
+        x (torch.Tensor): A tensor.
+
+    Returns:
+        bool: Indicator for whether `x` has any zero-valued entries.
+    """
+    return (x == 0).float().any()
+
+
+def _bounded_in_plus_minus_one(x: torch.Tensor):
+    """Checks whether all entries of `x` are in ``[-1, 1]``.
+
+    Args:
+        x (torch.Tensor): A tensor.
+
+    Returns:
+        bool: Indicator for whether `x` has values outside of ``[-1, 1]``.
+    """
+    return (x.abs() <= 1).all()
+
+
+def probably_unconstrained(x: torch.Tensor):
+    """Checks whether `x` has any activation-like constraints.
+    Checks `x` has no exact zeros, not bounded in ``[-1, 1]``, and has both positive and
+    negative-valued entries.
+
+    Args:
+        x (torch.Tensor): A tensor.
+
+    Returns:
+        bool: Indicator for whether `x` passes the "constraints".
+    """
+    return not _has_zeros(x) and not _bounded_in_plus_minus_one(x) and _has_mixed_signs(x)
