@@ -3,9 +3,19 @@ from inspect import signature
 import torch
 
 
-def model_probably_good(model: torch.nn.Module,
-                        shape_in: tuple[int, ...],
-                        shape_out: tuple[int, ...]):
+def model_probably_good(
+        model: torch.nn.Module, shape_in: tuple[int, ...], shape_out: tuple[int, ...]
+) -> bool:
+    """Checks whether the model output has expected shape, is probably unconstrained, and the model has its configs stored.
+
+    Args:
+        model (torch.nn.Module): The module to be tested.
+        shape_in (tuple[int, ...]): Input data shape excluding the batch dimension.
+        shape_out (tuple[int, ...]): Output data shape excluding the batch dimension.
+
+    Returns:
+        bool: Indicator for whether the model meets the three conditions above.
+    """
     bs = 100
     x = torch.randn((bs, ) + shape_in)
     y = model(x)
@@ -15,7 +25,15 @@ def model_probably_good(model: torch.nn.Module,
             and _has_correct_config(model))
 
 
-def _has_correct_config(model: torch.nn.Module):
+def _has_correct_config(model: torch.nn.Module) -> bool:
+    """Checks whether the model has its initialization arguments stored in a `config` field.
+
+    Args:
+        model (torch.nn.Module): The module to be tested.
+
+    Returns:
+        bool: Indicator for whether the model has its initialization arguments stored.
+    """
     if not hasattr(model, "config"):
         return False
     sig = signature(model.__init__)
@@ -23,6 +41,15 @@ def _has_correct_config(model: torch.nn.Module):
 
 
 def _shapes_match(x: torch.Tensor, y: tuple[int, ...]) -> bool:
+    """Checks whether `x.shape` is equal to `y`.
+
+    Args:
+        x (torch.Tensor): A tensor.
+        y (tuple[int, ...]): The expected shape.
+
+    Returns:
+        bool: Indicator for whether the shape is as expected.
+    """
     return tuple(x.shape) == y
 
 
