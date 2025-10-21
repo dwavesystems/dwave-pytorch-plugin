@@ -1,7 +1,32 @@
+from inspect import signature
+
 import torch
 
 
-def are_all_spins(x: torch.Tensor) -> bool:
+def model_probably_good(model: torch.nn.Module,
+                        shape_in: tuple[int, ...],
+                        shape_out: tuple[int, ...]):
+    bs = 100
+    x = torch.randn((bs, ) + shape_in)
+    y = model(x)
+    padded_out = (bs,)+shape_out
+    return (_shapes_match(y, padded_out)
+            and _probably_unconstrained(y)
+            and _has_correct_config(model))
+
+
+def _has_correct_config(model: torch.nn.Module):
+    if not hasattr(model, "config"):
+        return False
+    sig = signature(model.__init__)
+    return set(model.config.keys()) == set(sig.parameters.keys()) | {"module_name"}
+
+
+def _shapes_match(x: torch.Tensor, y: tuple[int, ...]) -> bool:
+    return tuple(x.shape) == y
+
+
+def _are_all_spins(x: torch.Tensor) -> bool:
     """Checks all entries of `x` are one in absolute value.
 
     Args:
@@ -51,7 +76,7 @@ def _bounded_in_plus_minus_one(x: torch.Tensor):
     return (x.abs() <= 1).all()
 
 
-def probably_unconstrained(x: torch.Tensor):
+def _probably_unconstrained(x: torch.Tensor):
     """Checks whether `x` has any activation-like constraints.
     Checks `x` has no exact zeros, not bounded in ``[-1, 1]``, and has both positive and
     negative-valued entries.

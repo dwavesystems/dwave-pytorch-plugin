@@ -1,0 +1,5 @@
+---
+features:
+  - Add the python module `dwave.plugins.torch.nn`
+  - Add ``LinearBlock`` and ``SkipLinear` modules
+  - Add utilities for testing modules

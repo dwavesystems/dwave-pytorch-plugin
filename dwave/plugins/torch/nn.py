@@ -1,31 +1,35 @@
-from inspect import signature
+import inspect
+from functools import wraps
+from types import MappingProxyType
 
 import torch
 from torch import nn
 
 
-class Module(nn.Module):
+def store_config(fn):
+    @wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        # Get signature of function and match the arguments with their names
+        sig = inspect.signature(fn)
+        bound = sig.bind(self, *args, **kwargs)
+        # Use default values if the args/kwargs were not supplied
+        bound.apply_defaults()
+        config = {k: v for k, v in bound.arguments.items() if k != 'self'}
+        config['module_name'] = bound.args[0].__class__.__name__
+        self.config = MappingProxyType(config)
+        fn(self, *args, **kwargs)
+    return wrapper
 
-    def __init__(self, obj, kwargs):
-        """Base class for all neural network modules that additionally stores its init args in a config.
-        """
-        super().__init__()
-        self._config = {k: kwargs[k] for k in signature(obj.__init__).parameters.keys()}
 
-    @property
-    def config(self):
-        """The dictionary of arguments used to instantiate the model."""
-        return self._config.copy()
+class Identity(nn.Module):
 
-
-class Identity(Module):
-
+    @store_config
     def __init__(self):
         """An identity module.
 
         This module is useful for handling cases where a neural network module is expected, but no
         effect is desired."""
-        super().__init__(self, vars())
+        super().__init__()
 
     def forward(self, x) -> torch.Tensor:
         """Input
@@ -39,8 +43,9 @@ class Identity(Module):
         return x
 
 
-class SkipLinear(Module):
+class SkipLinear(nn.Module):
 
+    @store_config
     def __init__(self, din, dout) -> None:
         """Applies a linear transformation to the incoming data: :math:`y = xA^T`.
 
@@ -51,13 +56,13 @@ class SkipLinear(Module):
             din (int): Size of each input sample.
             dout (int): Size of each output sample.
         """
-        super().__init__(self, vars())
+        super().__init__()
         if din == dout:
             self.linear = Identity()
         else:
             self.linear = nn.Linear(din, dout, bias=False)
 
-    def forward(self, x):
+    def forward(self, x) -> torch.Tensor:
         """Apply a linear transformation to the input variable `x`.
 
         Args:
@@ -69,7 +74,8 @@ class SkipLinear(Module):
         return self.linear(x)
 
 
-class LinearBlock(Module):
+class LinearBlock(nn.Module):
+    @store_config
     def __init__(self, din, dout, p) -> None:
         """A linear block consisting of normalizations, linear transformations, dropout, relu, and a skip connection.
 
@@ -87,7 +93,7 @@ class LinearBlock(Module):
             dout (int): Size of each output sample
             p (float): Dropout probability.
         """
-        super().__init__(self, vars())
+        super().__init__()
         self.skip = SkipLinear(din, dout)
         linear_1 = nn.Linear(din, dout)
         linear_2 = nn.Linear(dout, dout)
