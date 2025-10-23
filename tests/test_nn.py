@@ -7,11 +7,7 @@ from dwave.plugins.torch.nn import LinearBlock, SkipLinear, store_config
 from tests.utils import model_probably_good
 
 
-class TestNN(unittest.TestCase):
-    """The tests in this class is, generally, concerned with two characteristics of the output.
-    1. Module outputs, probably, do not end with an activation function, and
-    2. the output tensor shapes are as expected.
-    """
+class TestUtils(unittest.TestCase):
 
     def test_store_config(self):
         # Simple case
@@ -42,6 +38,12 @@ class TestNN(unittest.TestCase):
                              {"module_1": module_1.config,
                               "module_2": module_2.config,
                               "module_name": "OuterModel"})
+
+class TestLinear(unittest.TestCase):
+    """The tests in this class is, generally, concerned with two characteristics of the output.
+    1. Module outputs, probably, do not end with an activation function, and
+    2. the output tensor shapes are as expected.
+    """
 
     @parameterized.expand([0, 0.5, 1])
     def test_LinearBlock(self, p):
