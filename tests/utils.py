@@ -26,12 +26,12 @@ def model_probably_good(
     x = torch.randn((bs, ) + shape_in)
     y = model(x)
     padded_out = (bs,)+shape_out
-    return (_shapes_match(y, padded_out)
-            and _probably_unconstrained(y)
-            and _has_correct_config(model))
+    return (shapes_match(y, padded_out)
+            and probably_unconstrained(y)
+            and has_correct_config(model))
 
 
-def _has_correct_config(model: torch.nn.Module) -> bool:
+def has_correct_config(model: torch.nn.Module) -> bool:
     """Checks whether the model has its initialization arguments stored in a `config` field.
 
     Args:
@@ -46,7 +46,7 @@ def _has_correct_config(model: torch.nn.Module) -> bool:
     return set(model.config.keys()) == set(sig.parameters.keys()) | {"module_name"}
 
 
-def _shapes_match(x: torch.Tensor, y: tuple[int, ...]) -> bool:
+def shapes_match(x: torch.Tensor, y: tuple[int, ...]) -> bool:
     """Checks whether `x.shape` is equal to `y`.
 
     Args:
@@ -59,7 +59,7 @@ def _shapes_match(x: torch.Tensor, y: tuple[int, ...]) -> bool:
     return tuple(x.shape) == y
 
 
-def _are_all_spins(x: torch.Tensor) -> bool:
+def are_all_spins(x: torch.Tensor) -> bool:
     """Checks all entries of `x` are one in absolute value.
 
     Args:
@@ -71,7 +71,7 @@ def _are_all_spins(x: torch.Tensor) -> bool:
     return (x.float().abs() == 1).all()
 
 
-def _has_mixed_signs(x: torch.Tensor) -> bool:
+def has_mixed_signs(x: torch.Tensor) -> bool:
     """Checks whether `x` has both positive and negative values.
 
     Args:
@@ -85,7 +85,7 @@ def _has_mixed_signs(x: torch.Tensor) -> bool:
             ((x < 0).float().sum() > 0))
 
 
-def _has_zeros(x: torch.Tensor) -> bool:
+def has_zeros(x: torch.Tensor) -> bool:
     """Checks whether `x` has exact zeros.
 
     Args:
@@ -97,7 +97,7 @@ def _has_zeros(x: torch.Tensor) -> bool:
     return (x == 0).float().any()
 
 
-def _bounded_in_plus_minus_one(x: torch.Tensor):
+def bounded_in_plus_minus_one(x: torch.Tensor):
     """Checks whether all entries of `x` are in ``[-1, 1]``.
 
     Args:
@@ -109,7 +109,7 @@ def _bounded_in_plus_minus_one(x: torch.Tensor):
     return (x.abs() <= 1).all()
 
 
-def _probably_unconstrained(x: torch.Tensor):
+def probably_unconstrained(x: torch.Tensor):
     """Checks whether `x` has any activation-like constraints.
     Checks `x` has no exact zeros, not bounded in ``[-1, 1]``, and has both positive and
     negative-valued entries.
@@ -120,4 +120,4 @@ def _probably_unconstrained(x: torch.Tensor):
     Returns:
         bool: Indicator for whether `x` passes the "constraints".
     """
-    return not _has_zeros(x) and not _bounded_in_plus_minus_one(x) and _has_mixed_signs(x)
+    return not has_zeros(x) and not bounded_in_plus_minus_one(x) and has_mixed_signs(x)
