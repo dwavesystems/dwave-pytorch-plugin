@@ -6,7 +6,13 @@ import torch
 def model_probably_good(
         model: torch.nn.Module, shape_in: tuple[int, ...], shape_out: tuple[int, ...]
 ) -> bool:
-    """Checks whether the model output has expected shape, is probably unconstrained, and the model has its configs stored.
+    """Checks whether the model output has expected shape, is probably unconstrained, and the model
+    has its configs stored.
+
+    This function generates dummy data with a padded batch dimension on top of the
+    input dimension (so ``shape_in`` should exclude a batch dimension). The data is passed through
+    the ``model``. Subsequent tests are described in ``_shapes_match``, ``_probably_unconstrained``,
+    and ``_has_correct_config``.
 
     Args:
         model (torch.nn.Module): The module to be tested.
@@ -98,7 +104,7 @@ def _bounded_in_plus_minus_one(x: torch.Tensor):
         x (torch.Tensor): A tensor.
 
     Returns:
-        bool: Indicator for whether `x` has values outside of ``[-1, 1]``.
+        bool: Indicator for whether all values of `x` are in ``[-1, 1]``.
     """
     return (x.abs() <= 1).all()
 

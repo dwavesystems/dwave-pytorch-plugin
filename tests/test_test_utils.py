@@ -7,9 +7,9 @@ from dwave.plugins.torch.nn import store_config
 from tests import utils
 
 
-class TestTestUtils(unittest.TestCase):
+class TestUtils(unittest.TestCase):
 
-    def test_probably_unconstrained(self):
+    def test__probably_unconstrained(self):
         x = torch.randn((1000, 10, 10))
         self.assertTrue(utils._probably_unconstrained(x))
 

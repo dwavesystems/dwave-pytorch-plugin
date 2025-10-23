@@ -20,8 +20,6 @@ class TestNN(unittest.TestCase):
             def __init__(self, a, b=1, *, x=4, y='hello'):
                 super().__init__()
 
-            def forward(self, x):
-                return x
         model = MyModel(a=123, x=5)
         self.assertDictEqual(dict(model.config),
                              {"a": 123, "b": 1, "x": 5, "y": "hello", "module_name": "MyModel"})

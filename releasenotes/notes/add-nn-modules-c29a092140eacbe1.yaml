@@ -2,5 +2,5 @@
 features:
   - Add the python module ``dwave.plugins.torch.nn`` containing commonly-used neural network modules
     and patterns used to build more complex architectures.
-  - Add ``LinearBlock`` and ``SkipLinear` modules.
+  - Add ``LinearBlock`` and ``SkipLinear`` modules.
   - Add utilities for testing torch modules added to the ``nn`` python submodule.
