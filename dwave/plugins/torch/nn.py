@@ -17,6 +17,8 @@ from __future__ import annotations
 import inspect
 from typing import TYPE_CHECKING, Callable
 
+from dwave.samplers import SimulatedAnnealingSampler
+
 if TYPE_CHECKING:
     from functools import partial
 
@@ -31,6 +33,12 @@ __all__ = ["store_config", "SkipLinear", "LinearBlock"]
 
 def store_config(fn: Callable) -> partial:
     """A decorator that tracks and stores arguments of methods (excluding ``self``).
+
+    NOTE: If an argument of the function also has a config attribute, then the argument's entry in
+    the dictionary will be replaced by the argument's config. For example, an argument ``foo`` has
+    a ``config`` attribute, i.e., ``foo.config`` exists, then ``self.config`` will contain the entry
+    ``{"foo": foo.config}``. This is motivated by the convenience of storing configs of nested
+    modules.
 
     Args:
         fn (Callable[object, ...]): A method whose arguments will be stored in ``self.config``.
@@ -48,6 +56,9 @@ def store_config(fn: Callable) -> partial:
 
         config = {k: v for k, v in bound.arguments.items() if v != self}
         config['module_name'] = self.__class__.__name__
+        for k, v in config.items():
+            if hasattr(v, "config"):
+                config[k] = v.config
         self.config = MappingProxyType(config)
 
         fn(self, *args, **kwargs)
@@ -55,10 +66,12 @@ def store_config(fn: Callable) -> partial:
 
 
 class SkipLinear(nn.Module):
-    """Applies a linear transformation to the incoming data: :math:`y = xA^T`.
+    """A linear transformation or the identity depending on whether input/output dimensions match.
 
-    This module is identity when ``din == dout``, otherwise, it is a linear transformation, i.e.,
-    no bias term.
+    This module is identity when ``din == dout``, otherwise, it is a linear transformation (no bias
+    term).
+
+    This is based on the `ResNet paper <https://arxiv.org/abs/1512.03385>`.
 
     Args:
         din (int): Size of each input sample.
@@ -97,6 +110,8 @@ class LinearBlock(nn.Module):
     6. a second linear layer, and, finally,
     7. a skip connection from initial input to output.
 
+    This is based on the `ResNet paper <https://arxiv.org/abs/1512.03385>`.
+
     Args:
         din (int): Size of each input sample.
         dout (int): Size of each output sample.
@@ -106,13 +121,14 @@ class LinearBlock(nn.Module):
     def __init__(self, din: int, dout: int, p: float) -> None:
         super().__init__()
         self._skip = SkipLinear(din, dout)
+        dhid = max(din, dout)
         self.block = nn.Sequential(
             nn.LayerNorm(din),
-            nn.Linear(din, dout),
+            nn.Linear(din, dhid),
             nn.Dropout(p),
             nn.ReLU(),
-            nn.LayerNorm(dout),
-            nn.Linear(dout, dout),
+            nn.LayerNorm(dhid),
+            nn.Linear(dhid, dout),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

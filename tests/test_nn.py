@@ -14,7 +14,7 @@ class TestNN(unittest.TestCase):
     """
 
     def test_store_config(self):
-        # Check the Module stores configs as expected.
+        # Simple case
         class MyModel(torch.nn.Module):
             @store_config
             def __init__(self, a, b=1, *, x=4, y='hello'):
@@ -24,8 +24,26 @@ class TestNN(unittest.TestCase):
                 return x
         model = MyModel(a=123, x=5)
         self.assertDictEqual(dict(model.config),
-                             {"a": 123, "b": 1, "x": 5, "y": "hello",
-                              "module_name": "MyModel"})
+                             {"a": 123, "b": 1, "x": 5, "y": "hello", "module_name": "MyModel"})
+
+        # Nested case
+        class InnerModel(torch.nn.Module):
+            @store_config
+            def __init__(self, a, b=1, *, x=4, y='hello'):
+                super().__init__()
+
+        class OuterModel(torch.nn.Module):
+            @store_config
+            def __init__(self, module_1, module_2=None):
+                super().__init__()
+
+        module_1 = InnerModel(a=123, x=5)
+        module_2 = InnerModel(a="second", y="lol")
+        model = OuterModel(module_1, module_2)
+        self.assertDictEqual(dict(model.config),
+                             {"module_1": module_1.config,
+                              "module_2": module_2.config,
+                              "module_name": "OuterModel"})
 
     @parameterized.expand([0, 0.5, 1])
     def test_LinearBlock(self, p):
