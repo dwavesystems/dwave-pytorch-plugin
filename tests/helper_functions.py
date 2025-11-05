@@ -11,8 +11,8 @@ def model_probably_good(
 
     This function generates dummy data with a padded batch dimension on top of the
     input dimension (so ``shape_in`` should exclude a batch dimension). The data is passed through
-    the ``model``. Subsequent tests are described in ``_shapes_match``, ``_probably_unconstrained``,
-    and ``_has_correct_config``.
+    the ``model``. Subsequent tests are described in ``shapes_match``, ``probably_unconstrained``,
+    and ``has_correct_config``.
 
     Args:
         model (torch.nn.Module): The module to be tested.

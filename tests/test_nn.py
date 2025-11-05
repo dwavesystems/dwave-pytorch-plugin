@@ -4,7 +4,7 @@ import torch
 from parameterized import parameterized
 
 from dwave.plugins.torch.nn import LinearBlock, SkipLinear, store_config
-from tests.utils import model_probably_good
+from tests.helper_functions import model_probably_good
 
 
 class TestUtils(unittest.TestCase):
@@ -20,24 +20,29 @@ class TestUtils(unittest.TestCase):
         self.assertDictEqual(dict(model.config),
                              {"a": 123, "b": 1, "x": 5, "y": "hello", "module_name": "MyModel"})
 
-        # Nested case
-        class InnerModel(torch.nn.Module):
-            @store_config
-            def __init__(self, a, b=1, *, x=4, y='hello'):
-                super().__init__()
+        with self.subTest("Nested configurations were not stored correctly."):
+            class InnerModel(torch.nn.Module):
+                @store_config
+                def __init__(self, a, b=1, *, x=4, y='hello'):
+                    super().__init__()
 
-        class OuterModel(torch.nn.Module):
-            @store_config
-            def __init__(self, module_1, module_2=None):
-                super().__init__()
+            class OuterModel(torch.nn.Module):
+                @store_config
+                def __init__(self, module_1, module_2=None):
+                    super().__init__()
 
-        module_1 = InnerModel(a=123, x=5)
-        module_2 = InnerModel(a="second", y="lol")
-        model = OuterModel(module_1, module_2)
-        self.assertDictEqual(dict(model.config),
-                             {"module_1": module_1.config,
-                              "module_2": module_2.config,
-                              "module_name": "OuterModel"})
+            module_1 = InnerModel(a=123, x=5)
+            module_2 = InnerModel(a="second", y="lol")
+            model = OuterModel(module_1, module_2)
+            self.assertDictEqual(dict(model.config),
+                                 {"module_1": module_1.config,
+                                  "module_2": module_2.config,
+                                  "module_name": "OuterModel"})
+            self.assertDictEqual(dict(model.config["module_1"]),
+                                 dict(a=123, b=1, x=5, y="hello", module_name="InnerModel"))
+            self.assertDictEqual(dict(model.config["module_2"]),
+                                 dict(a="second", b=1, x=4, y="lol", module_name="InnerModel"))
+
 
 class TestLinear(unittest.TestCase):
     """The tests in this class is, generally, concerned with two characteristics of the output.
@@ -57,6 +62,7 @@ class TestLinear(unittest.TestCase):
         dout = 99
         model = SkipLinear(din, dout)
         self.assertTrue(model_probably_good(model, (din,), (dout, )))
+
         with self.subTest("Check identity for `din == dout`"):
             dim = 123
             model = SkipLinear(dim, dim)
