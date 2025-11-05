@@ -97,4 +97,4 @@ class LinearBlock(nn.Module):
         Returns:
             torch.Tensor: Output tensor.
         """
-        return self.block(x) + self._skip(x)
+        return self._block(x) + self._skip(x)
