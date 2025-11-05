@@ -28,11 +28,12 @@ __all__ = ["store_config"]
 def store_config(fn: Callable) -> partial:
     """A decorator that tracks and stores arguments of methods (excluding ``self``).
 
-    NOTE: If an argument of the function also has a config attribute, then the argument's entry in
-    the dictionary will be replaced by the argument's config. For example, an argument ``foo`` has
-    a ``config`` attribute, i.e., ``foo.config`` exists, then ``self.config`` will contain the entry
-    ``{"foo": foo.config}``. This is motivated by the convenience of storing configs of nested
-    modules.
+    .. note:: 
+        If an argument of the function also has a config attribute, then the argument's entry in
+        the dictionary will be replaced by the argument's config. For example, an argument ``foo`` has
+        a ``config`` attribute, i.e., ``foo.config`` exists, then ``self.config`` will contain the entry
+        ``{"foo": foo.config}``. This is motivated by the convenience of storing configs of nested
+        modules.
 
     Args:
         fn (Callable[object, ...]): A method whose arguments will be stored in ``self.config``.

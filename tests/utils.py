@@ -32,7 +32,7 @@ def model_probably_good(
 
 
 def has_correct_config(model: torch.nn.Module) -> bool:
-    """Checks whether the model has its initialization arguments stored in a `config` field.
+    """Checks whether the model has its initialization arguments stored in a ``config`` field.
 
     Args:
         model (torch.nn.Module): The module to be tested.
@@ -80,9 +80,7 @@ def has_mixed_signs(x: torch.Tensor) -> bool:
     Returns:
         bool: Indicator for whether `x` consists of both positive and negative values.
     """
-    return (((x > 0).float().sum() > 0)
-            and
-            ((x < 0).float().sum() > 0))
+    return bool(x.max() > 0 and x.min() < 0)
 
 
 def has_zeros(x: torch.Tensor) -> bool:
@@ -97,7 +95,7 @@ def has_zeros(x: torch.Tensor) -> bool:
     return (x == 0).float().any()
 
 
-def bounded_in_plus_minus_one(x: torch.Tensor):
+def bounded_in_plus_minus_one(x: torch.Tensor) -> bool:
     """Checks whether all entries of `x` are in ``[-1, 1]``.
 
     Args:
@@ -106,7 +104,7 @@ def bounded_in_plus_minus_one(x: torch.Tensor):
     Returns:
         bool: Indicator for whether all values of `x` are in ``[-1, 1]``.
     """
-    return (x.abs() <= 1).all()
+    return bool((x.abs() <= 1).all())
 
 
 def probably_unconstrained(x: torch.Tensor):

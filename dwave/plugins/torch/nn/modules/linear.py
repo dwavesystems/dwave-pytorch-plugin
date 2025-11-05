@@ -57,6 +57,7 @@ class LinearBlock(nn.Module):
     """A linear block consisting of normalizations, linear transformations, dropout, relu, and a skip connection.
 
     The module is composed of (in order):
+
     1. a first layer norm,
     2. a first linear transformation,
     3. a dropout,
@@ -65,19 +66,20 @@ class LinearBlock(nn.Module):
     6. a second linear layer, and, finally,
     7. a skip connection from initial input to output.
 
-    This is based on the `ResNet paper <https://arxiv.org/abs/1512.03385>`.
+    This is based on the `ResNet paper <https://arxiv.org/abs/1512.03385>`_.
 
     Args:
         din (int): Size of each input sample.
         dout (int): Size of each output sample.
         p (float): Dropout probability.
     """
+
     @store_config
     def __init__(self, din: int, dout: int, p: float) -> None:
         super().__init__()
         self._skip = SkipLinear(din, dout)
         dhid = max(din, dout)
-        self.block = nn.Sequential(
+        self._block = nn.Sequential(
             nn.LayerNorm(din),
             nn.Linear(din, dhid),
             nn.Dropout(p),
