@@ -89,7 +89,7 @@ class LinearBlock(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Transforms the input `x` with the modules.
+        """Transforms the input ``x`` with the modules.
 
         Args:
             x (torch.Tensor): An input tensor.
