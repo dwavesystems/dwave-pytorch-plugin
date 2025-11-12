@@ -13,10 +13,11 @@ class TestHelperFunctions(unittest.TestCase):
         x = torch.randn((1000, 10, 10))
         self.assertTrue(helper_functions.probably_unconstrained(x))
 
-        # Activate
-        self.assertFalse(helper_functions.probably_unconstrained(x.sigmoid()))
-        self.assertFalse(helper_functions.probably_unconstrained(x.relu()))
-        self.assertFalse(helper_functions.probably_unconstrained(x.tanh()))
+    @parameterized.expand([torch.nn.Sigmoid(), torch.nn.Tanh(), torch.nn.ReLU()])
+    def test_probably_unconstrained_activated(self, activation):
+        x = torch.randn((1000, 10, 10))
+        self.assertFalse(helper_functions.probably_unconstrained(activation(x)),
+                         f"Failed to flag {activation.__class__.__name__} as probably not good.")
 
     def test_are_all_spins(self):
         # Scalar case
