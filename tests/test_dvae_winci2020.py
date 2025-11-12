@@ -15,6 +15,7 @@
 import unittest
 
 import torch
+from einops import repeat
 from parameterized import parameterized
 
 from dwave.plugins.torch.models.boltzmann_machine import GraphRestrictedBoltzmannMachine
@@ -22,6 +23,7 @@ from dwave.plugins.torch.models.discrete_variational_autoencoder import (
     DiscreteVariationalAutoencoder as DVAE,
 )
 from dwave.plugins.torch.models.losses.kl_divergence import pseudo_kl_divergence_loss
+from dwave.plugins.torch.models.losses.mmd import MMDLoss, RadialBasisFunction, mmd_loss
 from dwave.samplers import SimulatedAnnealingSampler
 
 
@@ -84,6 +86,28 @@ class TestDiscreteVariationalAutoencoder(unittest.TestCase):
 
         self.dvaes = {i: DVAE(self.encoders[i], self.decoders[i]) for i in latent_dims_list}
 
+        # Now we also create a DVAE with a trainable Encoder
+        def deterministic_latent_to_discrete(logits: torch.Tensor, n_samples: int) -> torch.Tensor:
+            # straight-through estimator that maps positive logits to 1 and negative logits to -1
+            hard = torch.sign(logits)
+            soft = logits
+            result = hard - soft.detach() + soft
+            # Now we need to repeat the result n_samples times along a new dimension
+            return repeat(result, "b ... -> b n ...", n=n_samples)
+
+        self.dvae_with_trainable_encoder = DVAE(
+            encoder=torch.nn.Linear(input_features, latent_features),
+            decoder=Decoder(latent_features, input_features),
+            latent_to_discrete=deterministic_latent_to_discrete,
+        )
+
+        self.fixed_boltzmann_machine = GraphRestrictedBoltzmannMachine(
+            nodes=(0, 1),
+            edges=[(0, 1)],
+            linear={0: 0.0, 1: 0.0},
+            quadratic={(0, 1): 0.0},
+        )  # Creates a uniform distribution over spin strings of length 2
+
         self.boltzmann_machine = GraphRestrictedBoltzmannMachine(
             nodes=(0, 1),
             edges=[(0, 1)],
@@ -109,6 +133,49 @@ class TestDiscreteVariationalAutoencoder(unittest.TestCase):
         torch.testing.assert_close(torch.tensor([-1, -1]).float(), discretes[2])
         # map [0, 1] to [-1, 1]:
         torch.testing.assert_close(torch.tensor([-1, 1]).float(), discretes[3])
+
+    @parameterized.expand([True, False])
+    def test_train_encoder_with_mmd(self, use_mmd_loss_class: bool = False):
+        """Test training the encoder of the DVAE with MMD loss and fixed decoder and GRBM prior."""
+        dvae = self.dvae_with_trainable_encoder
+        optimiser = torch.optim.SGD(dvae.encoder.parameters(), lr=0.01, momentum=0.9)
+        kernel = RadialBasisFunction(num_features=5, mul_factor=2.0, bandwidth=None)
+        # Before training, the encoder will not map data points to the correct spin strings:
+        expected_set = {(1.0, 1.0), (1.0, -1.0), (-1.0, -1.0), (-1.0, 1.0)}
+        _, discretes, _ = dvae(self.data, n_samples=1)
+        discretes = discretes.squeeze(1)
+        discretes_set = {tuple(row.tolist()) for row in discretes}
+        self.assertNotEqual(discretes_set, expected_set)
+        mmd_loss_module = None
+        # Train the encoder so that the latent distribution matches the prior GRBM distribution
+        for _ in range(1000):
+            optimiser.zero_grad()
+            _, discretes, _ = dvae(self.data, n_samples=1)
+            discretes = discretes.reshape(discretes.shape[0], -1)
+            prior_samples = self.fixed_boltzmann_machine.sample(
+                sampler=self.sampler_sa,
+                as_tensor=True,
+                device=discretes.device,
+                prefactor=1.0,
+                linear_range=None,
+                quadratic_range=None,
+                sample_params=dict(num_sweeps=10, seed=1234, num_reads=100),
+            )
+            if use_mmd_loss_class:
+                if mmd_loss_module is None:
+                    mmd_loss_module = MMDLoss(kernel)
+                mmd = mmd_loss_module(discretes, prior_samples)
+            else:
+                mmd = mmd_loss(discretes, prior_samples, kernel)
+            mmd.backward()
+            optimiser.step()
+        # After training, the encoder should map data points to spin strings that match the samples
+        # from the prior GRBM. Since the prior GRBM is uniform over spin strings of length 2, the
+        # encoder should map the four data points to the four spin strings (in any order).
+        _, discretes, _ = dvae(self.data, n_samples=1)
+        discretes = discretes.squeeze(1)
+        discretes_set = {tuple(row.tolist()) for row in discretes}
+        self.assertEqual(discretes_set, expected_set)
 
     @parameterized.expand([1, 2])
     def test_train(self, n_latent_dims):

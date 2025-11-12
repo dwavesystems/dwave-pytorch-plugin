@@ -1,0 +1,10 @@
+---
+features:
+  - |
+    MMD loss is available in ``dwave.plugins.torch.models.losses.mmd.mmd_loss``,
+    which computes the MMD loss using a ``dwave.plugins.torch.models.losses.mmd.Kernel``
+    (specialized to the ``dwave.plugins.torch.models.losses.mmd.RBFKernel``). This
+    enables training encoders in discrete variational autoencoders to match the
+    distribution of the prior model.
+
+    
