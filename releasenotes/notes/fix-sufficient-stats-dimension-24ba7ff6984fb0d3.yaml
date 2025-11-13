@@ -1,0 +1,6 @@
+---
+fixes:
+  - |
+    Fix the concatenation of statistics in ``GraphRestrictedBoltzmannMachine.sufficient_statistics``.
+    The issue was the concatenation of statistics were hard-coded at dimension 1 when it should have
+    been the final dimension (to reflect that of ``GraphRestrictedBoltzmannMachine.interactions``).

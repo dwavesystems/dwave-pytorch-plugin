@@ -607,7 +607,7 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
             torch.Tensor: The sufficient statistics of ``x``.
         """
         interactions = self.interactions(x)
-        return torch.cat([x, interactions], 1)
+        return torch.cat([x, interactions], -1)
 
     def to_ising(
         self,

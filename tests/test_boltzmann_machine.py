@@ -16,6 +16,7 @@ import unittest
 
 import torch
 from dimod import SPIN, BinaryQuadraticModel, IdentitySampler, SampleSet
+from parameterized import parameterized
 
 from dwave.plugins.torch.models.boltzmann_machine import GraphRestrictedBoltzmannMachine as GRBM
 from dwave.system.temperatures import maximum_pseudolikelihood_temperature as mple
@@ -189,23 +190,33 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         # expectation = tanh(effective field) = tanh(0.1)
         torch.testing.assert_close(expected, [[-1.0, torch.tanh(torch.tensor(-0.1)).item(), 1.0]])
 
-    def test_sufficient_statistics(self):
+    @parameterized.expand([
+        (
+            torch.ones(1, 4),
+            [[1]*8]
+        ),
+        (  # Same values as above, but with padded dimensions
+            torch.ones(1, 1, 1, 4),
+            [[[[1]*8]]]
+        ),
+        (
+            torch.vstack([torch.ones(4), -torch.ones(4)]),
+            [[1]*8, [-1]*4+[1]*4]
+        ),
+        (
+            torch.tensor([[1, -1, 1, -1]]),
+            [[1, -1, 1, -1, -1, -1, 1, 1]]
+        )
+    ])
+    def test_sufficient_statistics(self, x, answer):
         # Model for reference:
         #       a
         #     / | \
         #    b--c  d
         # Edge list for reference:
         # [["a", "b"], ["a", "c"], ["a", "d"], ["b", "c"]]
-        t0 = self.bm.sufficient_statistics(self.ones)
-        self.assertListEqual(t0.tolist(), [[1] * 8])
-
-        t1 = self.bm.sufficient_statistics(torch.vstack([self.ones, self.mones]))
-        self.assertListEqual(t1.tolist(), [[1] * 8, [-1] * 4 + [1] * 4])
-
-        t2 = self.bm.sufficient_statistics(self.pmones)
-        # 1 -1 1 -1
-        # d  b a  c
-        self.assertEqual(t2.tolist(), [[1, -1, 1, -1, -1, -1, 1, 1]])
+        t0 = self.bm.sufficient_statistics(x)
+        self.assertListEqual(t0.tolist(), answer)
 
     def test_interactions(self):
         # Model for reference:
