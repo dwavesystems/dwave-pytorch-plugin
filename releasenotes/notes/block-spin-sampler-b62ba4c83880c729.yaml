@@ -1,0 +1,10 @@
+---
+features:
+  - |
+    Add ``BlockSampler`` for performing block Gibbs (or Metropolis) sampling of
+    graph-restricted Boltzmann Machines.
+  - |
+    Add functions for converting spins to bits and bits to spins.
+  - |
+    Add ``randspin`` for generating random spins.
+

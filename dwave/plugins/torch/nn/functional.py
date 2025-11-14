@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Functional interface."""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -22,8 +21,7 @@ if TYPE_CHECKING:
 
 import torch
 
-__all__ = ["maximum_mean_discrepancy_loss"]
-
+__all__ = ["maximum_mean_discrepancy_loss", "bit2spin_soft", "spin2bit_soft"]
 
 
 def maximum_mean_discrepancy_loss(x: torch.Tensor, y: torch.Tensor, kernel: Kernel) -> torch.Tensor:
@@ -82,3 +80,41 @@ def maximum_mean_discrepancy_loss(x: torch.Tensor, y: torch.Tensor, kernel: Kern
     yy = (kernel_yy.sum() - kernel_yy.trace()) / (num_y * (num_y - 1))
     xy = kernel_xy.sum() / (num_x * num_y)
     return xx + yy - 2 * xy
+
+
+def bit2spin_soft(b: torch.Tensor) -> torch.Tensor:
+    """Maps input :math:`b` to :math:`2b-1`.
+
+    The mapping does not require :math:`b` to be binary, only that it is in the interval :math:`[0, 1]`.
+
+    Args:
+        b (torch.Tensor): Input tensor of values in :math:`[0, 1]`.
+
+    Raises:
+        ValueError: If not all ``b`` values are in :math:`[0, 1]`.
+
+    Returns:
+        torch.Tensor: A tensor with values :math:`2b-1`.
+    """
+    if not ((b >= 0) & (b <= 1)).all():
+        raise ValueError(f"Not all inputs are in [0, 1]: {b}")
+    return b * 2 - 1
+
+
+def spin2bit_soft(s: torch.Tensor) -> torch.Tensor:
+    """Maps input :math:`s` to :math:`(s+1)/2`.
+
+    The mapping does not require :math:`s` to be spin-valued, only that it is in the interval :math:`[-1, 1]`.
+
+    Args:
+        s (torch.Tensor): Input tensor of values in :math:`[-1, 1]`.
+
+    Raises:
+        ValueError: If not all ``s`` values are in `[-1, 1]`.
+
+    Returns:
+        torch.Tensor: A tensor with values :math:`(s+1)/2`.
+    """
+    if (s.abs() > 1).any():
+        raise ValueError(f"Not all inputs are in [-1, 1]: {s}")
+    return (s + 1) / 2
