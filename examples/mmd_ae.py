@@ -11,9 +11,9 @@ from torchvision.transforms.v2 import Compose, ToDtype, ToImage
 from torchvision.utils import make_grid, save_image
 
 from dwave.plugins.torch.models.boltzmann_machine import GraphRestrictedBoltzmannMachine as GRBM
-from dwave.plugins.torch.nn import (ConvolutionNetwork, FullyConnectedNetwork, LinearBlock,
-                                    MaximumMeanDiscrepancy, RadialBasis, StraightThroughTanh,
-                                    rands_like, zephyr_subgraph)
+from dwave.plugins.torch.nn.modules import (ConvolutionNetwork, FullyConnectedNetwork,
+                                            MaximumMeanDiscrepancy, RadialBasis,
+                                            StraightThroughTanh, rands_like, zephyr_subgraph)
 from dwave.system import DWaveSampler
 
 
@@ -32,7 +32,6 @@ class Autoencoder(nn.Module):
             nn.Flatten(),
             FullyConnectedNetwork(chidden*h*w, n_bits, depth_fcnn, False, dropout),
         )
-        self.mixer = LinearBlock(n_bits, n_bits, False, dropout)
         self.binarizer = StraightThroughTanh()
         self.decoder = nn.Sequential(
             FullyConnectedNetwork(n_bits, chidden*h*w, depth_fcnn, False, dropout),
@@ -41,24 +40,21 @@ class Autoencoder(nn.Module):
         )
 
     def decode(self, q):
-        z = self.mixer(q)
-        xhat = self.decoder(z)
-        return z, xhat
+        xhat = self.decoder(q)
+        return xhat
 
     def forward(self, x):
         spins = self.binarizer(self.encoder(x))
-        z, xhat = self.decode(spins)
-        return spins, z, xhat
+        xhat = self.decode(spins)
+        return spins, xhat
 
 
 def collect_stats(model, grbm, x, q, compute_mmd):
-    s, z, xhat = model(x)
-    zgen, xgen = model.decode(q)
+    s, xhat = model(x)
     stats = {
         "quasi": grbm.quasi_objective(s.detach(), q),
         "bce": nn.functional.binary_cross_entropy_with_logits(xhat, x),
         "mmd": compute_mmd(s, q),
-        "mmd2": compute_mmd(z, zgen),
     }
     return stats
 
@@ -79,10 +75,10 @@ def round_graph_down(graph, group_size):
 
 
 def run(*, num_steps):
-    sampler = DWaveSampler(solver="Advantage2_system1.7")
+    sampler = DWaveSampler(solver="Advantage2_system1.8")
     sample_params = dict(num_reads=500, annealing_time=0.5, answer_mode="raw", auto_scale=False)
     h_range, j_range = sampler.properties["h_range"], sampler.properties["j_range"]
-    outdir = "output/mmd_ae/"
+    outdir = "output/example_mmd_ae/"
     makedirs(outdir, exist_ok=True)
 
     device = "cuda"
@@ -117,7 +113,7 @@ def run(*, num_steps):
         # Train autoencoder
         stats = collect_stats(model, grbm, x, q, compute_mmd)
         opt_ae.zero_grad()
-        (stats["bce"] + stats["mmd"] + stats["mmd2"]).backward()
+        (stats["bce"] + stats["mmd"]).backward()
         opt_ae.step()
 
         # Train GRBM
@@ -131,9 +127,10 @@ def run(*, num_steps):
         if step % 10 == 0:
             with torch.no_grad():
                 grbm.eval()
-                xgen = model.decode(q[:100])[-1]
-                xuni = model.decode(rands_like(q[:100]))[-1]
+                xgen = model.decode(q[:100])
+                xuni = model.decode(rands_like(q[:100]))
                 xhat = model(x[:100])[-1]
+                save_image(make_grid(x[:100], 10, pad_value=1), outdir + "x.png")
                 save_image(make_grid(xgen.sigmoid(), 10, pad_value=1), outdir + "xgen.png")
                 save_image(make_grid(xhat.sigmoid(), 10, pad_value=1), outdir + "xhat.png")
                 save_image(make_grid(xuni.sigmoid(), 10, pad_value=1), outdir + "xuni.png")
