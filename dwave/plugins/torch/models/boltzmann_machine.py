@@ -43,7 +43,7 @@ from dwave.system.temperatures import maximum_pseudolikelihood_temperature as mp
 spread = AggregatedSamples.spread
 
 
-__all__ = ["GraphRestrictedBoltzmannMachine"]
+__all__ = ["GraphRestrictedBoltzmannMachine", "RestrictedBoltzmannMachine"]
 
 
 class GraphRestrictedBoltzmannMachine(torch.nn.Module):
@@ -662,3 +662,277 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         bqm = BinaryQuadraticModel.from_ising(*self.to_ising(1))
         beta = 1 / mple(bqm, (spins.detach().cpu().numpy(), self._nodes))[0]
         return beta
+
+class RestrictedBoltzmannMachine(torch.nn.Module):
+    """A Restricted Boltzmann Machine (RBM) model.
+
+    This class defines the parameterization and inference of a binary RBM.
+    Training is performed using Persistent Contrastive Divergence (PCD).
+
+    Args:
+        n_visible (int): Number of visible units.
+        n_hidden (int): Number of hidden units.
+    """
+
+    def __init__(
+        self,
+        n_visible: int,
+        n_hidden: int,
+    ) -> None:
+        super().__init__()
+
+        # Model hyperparameters
+        self._n_visible = n_visible
+        self._n_hidden = n_hidden
+
+        # Initialize model parameters      
+        # initialize weights
+        self._weights = torch.nn.Parameter(
+            0.1 * torch.randn(n_visible, n_hidden)
+        )
+        # initialize visible units biases.
+        self._visible_biases = torch.nn.Parameter(
+            0.5 * torch.ones(n_visible)
+        )  
+        # initialize hidden units biases.
+        self._hidden_biases = torch.nn.Parameter(
+            0.5 * torch.ones(n_hidden)
+        )
+
+        # Stores the last visible states to initialize the Markov chain in Persistent Contrastive Divergence (PCD)
+        self.register_buffer("_previous_visible_values", None)
+
+        # Initialize momenta tensors for momentum-based updates (all start at 0)
+        self.register_buffer("_weight_momenta", torch.zeros(n_visible, n_hidden))
+        self.register_buffer("_visible_bias_momenta", torch.zeros(n_visible))
+        self.register_buffer("_hidden_bias_momenta", torch.zeros(n_hidden))
+
+    @property
+    def n_visible(self) -> int:
+        """Number of visible units."""
+        return self._n_visible
+
+    @property
+    def n_hidden(self) -> int:
+        """Number of hidden units."""
+        return self._n_hidden
+    
+    @property
+    def weights(self) -> torch.Tensor:
+        """Weights of the RBM."""
+        return self._weights
+    
+    @property
+    def visible_biases(self) -> torch.Tensor:
+        """Visible biases of the RBM."""
+        return self._visible_biases
+    
+    @property
+    def hidden_biases(self) -> torch.Tensor:
+        """Hidden biases of the RBM."""
+        return self._hidden_biases
+    
+    @property
+    def previous_visible_values(self) -> torch.Tensor:
+        """Previous visible values used in Persistent Contrastive Divergence (PCD)."""
+        return self._previous_visible_values
+    
+    @property
+    def weight_momenta(self) -> torch.Tensor:
+        """Weight momenta of the RBM."""
+        return self._weight_momenta
+    
+    @property
+    def visible_bias_momenta(self) -> torch.Tensor:
+        """Visible bias momenta of the RBM."""
+        return self._visible_bias_momenta
+    
+    @property
+    def hidden_bias_momenta(self) -> torch.Tensor:
+        """Hidden bias momenta of the RBM."""
+        return self._hidden_bias_momenta
+    
+    
+    def _sample_hidden(self, visible: torch.Tensor) -> torch.Tensor:
+        """Sample from the distribution P(h|v).
+
+        Args:
+            visible (torch.Tensor): Tensor of shape (batch_size, n_visible)
+            representing the states of visible units.
+
+        Returns:
+            torch.Tensor: Binary tensor of shape (batch_size, n_hidden) representing
+                sampled hidden units.
+        """
+        hidden_probs = torch.sigmoid(self._hidden_biases + visible @ self._weights)
+        return torch.bernoulli(hidden_probs)
+
+    def _sample_visible(self, hidden: torch.Tensor) -> torch.Tensor:
+        """Sample from the distribution P(v|h).
+
+        Args:
+            hidden (torch.Tensor): Tensor of shape (batch_size, n_hidden)
+            representing the states of hidden units.
+        Returns:
+            torch.Tensor: Binary tensor of shape (batch_size, n_visible) representing
+            sampled visible units.
+        """
+        visible_probs = torch.sigmoid(self._visible_biases + hidden @ self._weights.t())
+        return torch.bernoulli(visible_probs)
+
+    def generate_sample(
+        self,
+        batch_size: int,
+        gibbs_steps: int,
+        start_visible: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Generate a sample of visible and hidden units using gibbs sampling.
+
+        Args:
+            batch_size (int): Number of samples to generate.
+            gibbs_steps (int): Number of Gibbs sampling steps to perform.
+            start_visible (torch.Tensor | None, optional):  Initial visible states to
+                start the Gibbs chain (shape: [batch_size, n_visible]). If None,
+                a random Gaussian initialization is used.
+
+
+        Returns:
+            tuple[torch.Tensor, torch.Tensor]: A tuple of (visible, hidden) from the last Gibbs step:
+                - visible: (batch_size, n_visible)
+                - hidden:  (batch_size, n_hidden)
+        """
+        if start_visible is None:
+            visible_values = torch.randn(
+                batch_size, self.n_visible, device=self._weights.device
+            )
+        else:
+            visible_values = start_visible
+
+        hidden_values = None
+
+        for _ in range(gibbs_steps):
+            hidden_values = self._sample_hidden(visible_values)
+            visible_values = self._sample_visible(hidden_values)
+
+        return visible_values, hidden_values
+
+    def _contrastive_divergence(
+        self,
+        batch: torch.Tensor,
+        epoch: int,
+        n_gibbs_steps: int,
+        learning_rate: float,
+        momentum_coefficient: float,
+        weight_decay: float,
+        n_epochs: int,
+    ) -> torch.Tensor:
+        """
+        Perform one step of Contrastive Divergence (CD-k) with momentum and weight decay.
+        Uses Persistent Contrastive Divergence (PCD) by maintaining the last visible states
+        for Gibbs sampling across batches.
+
+        Args:
+            batch (torch.Tensor): A batch of input data of shape (batch_size, n_visible).
+            epoch (int): Current training epoch.
+            n_gibbs_steps (int): Number of Gibbs sampling steps per epoch.
+            learning_rate (float): Base learning rate for parameter updates.
+            momentum_coefficient (float): Momentum coefficient for parameter updates.
+            weight_decay (float): weight decay (L2 regularization) coefficient for weights.
+            n_epochs (int): Number of training epochs.
+
+        Returns:
+            torch.Tensor: The reconstruction error (L1 norm) for the batch.
+
+        """
+
+        # Positive phase (data-driven)
+        hidden_probs = torch.sigmoid(self._hidden_biases + batch @ self._weights)
+
+        weight_grads = torch.matmul(batch.t(), hidden_probs)
+        visible_bias_grads = batch
+        hidden_bias_grads = hidden_probs
+
+        batch_size = batch.size(0)
+        
+        # Initialize previous visible states for Persistent CD
+        if self._previous_visible_values == None:
+            self._previous_visible_values = torch.randn_like(
+                batch, device=self._weights.device
+            )
+
+        # Negative phase (model-driven)
+        # Sample from the model using gibbs sampling
+        visible_values, hidden_values = self.generate_sample(
+            batch_size, n_gibbs_steps, self._previous_visible_values
+        )
+
+        visible_values = visible_values.detach()
+        hidden_values = hidden_values.detach()
+        # Store samples to initialize the next Markov chain with (PCD)
+        self._previous_visible_values = visible_values
+
+        # Compute the gradients for negative phase
+        weight_grads -= torch.matmul(visible_values.t(), hidden_values)
+
+        visible_bias_grads -= visible_values
+        hidden_bias_grads -= hidden_values
+
+        # Average across the batch
+        weight_grads /= batch_size
+        visible_bias_grads /= batch_size
+        hidden_bias_grads /= batch_size
+
+        # Compute decayed learning rate
+        decayed_learning_rate = learning_rate - (learning_rate / n_epochs * epoch)
+
+        # Update momenta
+        self._weight_momenta = self._weight_momenta * momentum_coefficient + decayed_learning_rate * weight_grads
+        self._visible_bias_momenta = self._visible_bias_momenta * momentum_coefficient + decayed_learning_rate * torch.sum(
+            visible_bias_grads, dim=0
+        )
+        self._hidden_bias_momenta = self._hidden_bias_momenta * momentum_coefficient + decayed_learning_rate * torch.sum(
+            hidden_bias_grads, dim=0
+        )
+
+        with torch.no_grad():
+            # Update parameters
+            self._weights += self._weight_momenta
+            self._visible_biases += self._visible_bias_momenta
+            self._hidden_biases += self._hidden_bias_momenta
+
+            # Apply weight decay
+            self._weights -= decayed_learning_rate * self._weights * weight_decay
+
+        # Compute reconstruction error (L1 norm)
+        reconstruction = self._sample_visible(self._sample_hidden(batch))
+        reconstruction = reconstruction.detach()
+        error = torch.sum(torch.abs(batch - reconstruction))
+
+        return error
+
+    def forward(self, visible: torch.Tensor) -> torch.Tensor:
+        """
+        Computes the RBM free energy of a batch of visible units averaged over the batch.
+
+        The free energy F(visible) for a visible vector visible is:
+
+            F(visible) = - visible · visible_biases
+                        - sum_{j=1}^{n_hidden} log(1 + exp(hidden_biases[j] + (visible · weights)_j))
+
+        Args:
+            visible (torch.Tensor): Tensor of shape (batch_size, n_visible) representing the visible layer.
+
+        Returns:
+            torch.Tensor: Scalar tensor representing the **average free energy** over the batch.
+        """
+
+        v_term = (visible * self._visible_biases).sum(dim=1)
+
+        hidden_pre_activation = visible @ self._weights + self._hidden_biases
+
+        h_term = torch.sum(torch.nn.functional.softplus(hidden_pre_activation), dim=1)
+
+        free_energy_per_sample = -v_term - h_term
+
+        # average over batch
+        return free_energy_per_sample.mean()
