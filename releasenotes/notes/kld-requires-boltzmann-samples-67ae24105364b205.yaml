@@ -1,0 +1,7 @@
+---
+upgrade:
+  - |
+    ``dwave.plugins.torch.models.losses.kl_divergence.pseudo_kl_divergence_loss``
+    no longer uses the Graph-Restricted Boltzmann Machine to generate Boltzmann
+    samples internally. Instead, the samples must be provided as an argument
+    to the function. This is a breaking change.

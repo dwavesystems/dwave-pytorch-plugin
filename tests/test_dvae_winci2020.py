@@ -129,12 +129,17 @@ class TestDiscreteVariationalAutoencoder(unittest.TestCase):
 
             discretes = discretes.reshape(discretes.shape[0], -1)
             latents = latents.reshape(latents.shape[0], -1)
+            samples = self.boltzmann_machine.sample(
+                self.sampler_sa,
+                as_tensor=True,
+                prefactor=1.0,
+                sample_params=dict(num_sweeps=10, seed=1234, num_reads=100),
+            )
             kl_loss = pseudo_kl_divergence_loss(
                 discretes,
                 latents,
+                samples,
                 self.boltzmann_machine,
-                self.sampler_sa,
-                dict(num_sweeps=10, seed=1234, num_reads=100),
             )
             loss = loss + 1e-1 * kl_loss
             optimiser.zero_grad()
