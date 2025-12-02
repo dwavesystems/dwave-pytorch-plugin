@@ -2,6 +2,8 @@ torch==2.9.1
 dimod==0.12.18
 dwave-system==1.28.0
 dwave-hybrid==0.6.13
+rearrange==0.8.1
+x-transformers==2.11.23
 
 # Development requirements
 reno==4.1.0
