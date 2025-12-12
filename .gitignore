@@ -67,9 +67,3 @@ dmypy.json
 
 # aim
 *.aim*
-
-# Datasets
-data/*
-
-# Generated images
-samples/*

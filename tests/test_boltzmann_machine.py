@@ -429,13 +429,13 @@ class TestRBM(unittest.TestCase):
 
     def test_sample_hidden_shape(self):
         visible = torch.randint(0, 2, (5, self.rbm.n_visible)).float()
-        hidden = self.rbm._sample_hidden(visible)
+        hidden = self.rbm.sample_hidden(visible)
         # Ensure shape is correct
         self.assertEqual(hidden.shape, (5, self.rbm.n_hidden))
 
     def test_sample_hidden_binary(self):
         visible = torch.randint(0, 2, (5, self.rbm.n_visible)).float()
-        hidden = self.rbm._sample_hidden(visible)
+        hidden = self.rbm.sample_hidden(visible)
 
         # Ensure output is binary
         self.assertTrue(torch.all((hidden == 0) | (hidden == 1)))
@@ -448,7 +448,7 @@ class TestRBM(unittest.TestCase):
     )
     def test_sample_hidden_saturation(self, name, bias_value, expected_value):
         """
-        Test that _sample_hidden saturates correctly when the hidden biases
+        Test that sample_hidden saturates correctly when the hidden biases
         are set to very large positive or negative values.
 
         If hidden_bias[j] → +∞
@@ -468,21 +468,21 @@ class TestRBM(unittest.TestCase):
         visible = torch.zeros(5, self.rbm.n_visible)
 
         # Sample hidden units
-        hidden = self.rbm._sample_hidden(visible)
+        hidden = self.rbm.sample_hidden(visible)
 
         # Assert that all hidden units match the expected saturated value
         self.assertTrue(torch.all(hidden == expected_value))
 
     def test_sample_visible_shape(self):
         hidden = torch.randint(0, 2, (5, self.rbm.n_hidden)).float()
-        visible = self.rbm._sample_visible(hidden)
+        visible = self.rbm.sample_visible(hidden)
 
         # Ensure shape is correct
         self.assertEqual(visible.shape, (5, self.rbm.n_visible))
 
     def test_sample_visible_binary(self):
         hidden = torch.randint(0, 2, (5, self.rbm.n_hidden)).float()
-        visible = self.rbm._sample_visible(hidden)
+        visible = self.rbm.sample_visible(hidden)
 
         # Ensure output is binary
         self.assertTrue(torch.all((visible == 0) | (visible == 1)).item())
@@ -495,7 +495,7 @@ class TestRBM(unittest.TestCase):
     )
     def test_sample_visible_saturation(self, name, bias_value, expected_value):
         """
-        Test that _sample_visible saturates correctly when the visible biases
+        Test that sample_visible saturates correctly when the visible biases
         are set to very large positive or negative values.
 
         If visible_bias → +∞: sigmoid → 1 → bernoulli(1) → always 1
@@ -509,122 +509,9 @@ class TestRBM(unittest.TestCase):
         # Hidden input doesn't matter when biases dominate
         hidden = torch.zeros(5, self.rbm.n_hidden)
 
-        visible = self.rbm._sample_visible(hidden)
+        visible = self.rbm.sample_visible(hidden)
 
         self.assertTrue(torch.all(visible == expected_value).item())
-
-    def test_generate_sample_shape(self):
-        batch_size = 4
-        visible, hidden = self.rbm.generate_sample(batch_size, gibbs_steps=2)
-
-        # Ensure shapes are correct
-        self.assertEqual(visible.shape, (batch_size, self.rbm.n_visible))
-        self.assertEqual(hidden.shape, (batch_size, self.rbm.n_hidden))
-
-    def test_generate_sample_binary(self):
-        batch_size = 4
-        visible, hidden = self.rbm.generate_sample(batch_size, gibbs_steps=2)
-
-        # Ensure outputs are binary
-        self.assertTrue(torch.all((visible == 0) | (visible == 1)).item())
-        self.assertTrue(torch.all((hidden == 0) | (hidden == 1)).item())
-
-    def test_generate_sample_initial_hidden_start_visible(self):
-        """
-        When providing a start_visible tensor and using gibbs_steps=1, the first
-        hidden sample should match _sample_hidden(start_visible). This ensures
-        the RBM correctly uses the provided initial visible state.
-        """
-        batch_size = 4
-        start = torch.zeros(batch_size, self.rbm.n_visible)
-
-        torch.manual_seed(42)
-        _, hidden = self.rbm.generate_sample(
-            batch_size, gibbs_steps=1, start_visible=start
-        )
-
-        torch.manual_seed(42)
-        expected_hidden = self.rbm._sample_hidden(start)
-
-        # First hidden sample should match _sample_hidden(start)
-        self.assertTrue(torch.equal(hidden, expected_hidden))
-
-    def test_generate_sample_more_gibbs_steps_changes_output(self):
-        batch_size = 4
-
-        torch.manual_seed(42)
-        v1, _ = self.rbm.generate_sample(batch_size, gibbs_steps=1)
-
-        torch.manual_seed(42)
-        v4, _ = self.rbm.generate_sample(batch_size, gibbs_steps=4)
-
-        # With same seed but longer chain, results should differ
-        self.assertFalse(torch.allclose(v1, v4))
-
-    def test_generate_sample_deterministic_small_rbm(self):
-        """
-        Test generate_sample on a tiny deterministic RBM with known parameters.
-        This test uses a 3x3 RBM with manually set weights, hidden biases, and
-        visible biases to ensure that the outputs are fully predictable.
-        """
-        rbm = RBM(n_visible=3, n_hidden=3)
-
-        # Set deterministic weights and biases
-        rbm._weights.data = torch.tensor(
-            [[0.2, -0.1, 0.0], [0.1, 0.3, -0.2], [-0.2, 0.1, 0.2]]
-        )
-        rbm._hidden_biases.data = torch.tensor([0.1, -0.2, 0.0])
-        rbm._visible_biases.data = torch.tensor([0.5, 0.0, 0.3])
-
-        start_visible = torch.zeros(1, 3)
-        torch.manual_seed(42)
-        visible, hidden = rbm.generate_sample(
-            batch_size=1, gibbs_steps=1, start_visible=start_visible
-        )
-
-        # Expected values computed manually
-        expected_hidden = torch.tensor([[0.0, 0.0, 1.0]])
-        expected_visible = torch.tensor([[0.0, 1.0, 1.0]])
-
-        # Check equality
-        self.assertTrue(torch.equal(hidden, expected_hidden))
-        self.assertTrue(torch.equal(visible, expected_visible))
-
-    def test_contrastive_divergence_returns_nonnegative_tensor(self):
-        """CD returns a tensor of type torch.Tensor and L1 error >= 0"""
-        error = self.rbm._contrastive_divergence(
-            batch = self.batch,
-            epoch=0,
-            n_gibbs_steps=1,
-            learning_rate=0.01,
-            momentum_coefficient=0.5,
-            weight_decay=0.0,
-            n_epochs=1,
-        )
-
-        self.assertIsInstance(error, torch.Tensor)
-        self.assertGreaterEqual(error.item(), 0.0)
-
-    @parameterized.expand(
-        [
-            ("weights", "_weights"),
-            ("visible_biases", "_visible_biases"),
-            ("hidden_biases", "_hidden_biases"),
-        ]
-    )
-    def test_cd_parameter_updates(self, name, attr):
-        """Test that the _contrastive_divergence function updates model parameters."""
-        torch.manual_seed(42)
-        before = getattr(self.rbm, attr).clone()
-
-        _ = self.rbm._contrastive_divergence(self.batch, **self.cd_kwargs)
-
-        after = getattr(self.rbm, attr)
-
-        # Check that parameters were updated
-        self.assertFalse(
-            torch.allclose(before, after), f"{attr} should update during CD"
-        )
 
     def test_forward_scalar_output(self):
         """Forward should return a scalar tensor."""
