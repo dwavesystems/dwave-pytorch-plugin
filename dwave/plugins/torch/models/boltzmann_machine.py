@@ -43,7 +43,7 @@ from dwave.system.temperatures import maximum_pseudolikelihood_temperature as mp
 spread = AggregatedSamples.spread
 
 
-__all__ = ["GraphRestrictedBoltzmannMachine"]
+__all__ = ["GraphRestrictedBoltzmannMachine", "RestrictedBoltzmannMachine"]
 
 
 class GraphRestrictedBoltzmannMachine(torch.nn.Module):
@@ -662,3 +662,119 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         bqm = BinaryQuadraticModel.from_ising(*self.to_ising(1))
         beta = 1 / mple(bqm, (spins.detach().cpu().numpy(), self._nodes))[0]
         return beta
+
+class RestrictedBoltzmannMachine(torch.nn.Module):
+    """A Restricted Boltzmann Machine (RBM) model.
+
+    This class defines the parameterization of a binary RBM.
+    Training using Persistent Contrastive Divergence (PCD) must be 
+    performed externally using separate sampler and optimizer classes.
+
+    Args:
+        n_visible (int): Number of visible units.
+        n_hidden (int): Number of hidden units.
+    """
+
+    def __init__(
+        self,
+        n_visible: int,
+        n_hidden: int,
+    ) -> None:
+        super().__init__()
+
+        # Model hyperparameters
+        self._n_visible = n_visible
+        self._n_hidden = n_hidden
+
+        # Initialize model parameters      
+        # initialize weights
+        self._weights = torch.nn.Parameter(
+            0.1 * torch.randn(n_visible, n_hidden)
+        )
+        # initialize visible units biases.
+        self._visible_biases = torch.nn.Parameter(
+            0.5 * torch.ones(n_visible)
+        )  
+        # initialize hidden units biases.
+        self._hidden_biases = torch.nn.Parameter(
+            0.5 * torch.ones(n_hidden)
+        )
+
+    @property
+    def n_visible(self) -> int:
+        """Number of visible units."""
+        return self._n_visible
+
+    @property
+    def n_hidden(self) -> int:
+        """Number of hidden units."""
+        return self._n_hidden
+    
+    @property
+    def weights(self) -> torch.Tensor:
+        """Weights of the RBM."""
+        return self._weights
+    
+    @property
+    def visible_biases(self) -> torch.Tensor:
+        """Visible biases of the RBM."""
+        return self._visible_biases
+    
+    @property
+    def hidden_biases(self) -> torch.Tensor:
+        """Hidden biases of the RBM."""
+        return self._hidden_biases
+    
+    def sample_hidden(self, visible: torch.Tensor) -> torch.Tensor:
+        """Sample from the distribution P(h|v).
+
+        Args:
+            visible (torch.Tensor): Tensor of shape (batch_size, n_visible)
+                representing the states of visible units.
+
+        Returns:
+            torch.Tensor: Binary tensor of shape (batch_size, n_hidden) representing
+            sampled hidden units.
+        """
+        hidden_probs = torch.sigmoid(self._hidden_biases + visible @ self._weights) 
+        return torch.bernoulli(hidden_probs)
+
+    def sample_visible(self, hidden: torch.Tensor) -> torch.Tensor:
+        """Sample from the distribution P(v|h).
+
+        Args:
+            hidden (torch.Tensor): Tensor of shape (batch_size, n_hidden)
+                representing the states of hidden units.
+        Returns:
+            torch.Tensor: Binary tensor of shape (batch_size, n_visible) representing
+            sampled visible units.
+        """
+        visible_probs = torch.sigmoid(self._visible_biases + hidden @ self._weights.t())
+        return torch.bernoulli(visible_probs)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Computes the RBM free energy of a batch of visible units averaged over the batch.
+
+        The free energy F(x) for a visible vector x is:
+
+        .. math::
+            F(x) = - x · visible_biases
+                        - sum_{j=1}^{n_hidden} log(1 + exp(hidden_biases[j] + (x · weights)_j))
+
+        Args:
+            x (torch.Tensor): Tensor of shape (batch_size, n_visible) representing the visible layer.
+
+        Returns:
+            torch.Tensor: Scalar tensor representing the **average free energy** over the batch.
+        """
+
+        v_term = (x * self._visible_biases).sum(dim=1)
+
+        hidden_pre_activation = x @ self._weights + self._hidden_biases
+
+        h_term = torch.sum(torch.nn.functional.softplus(hidden_pre_activation), dim=1)
+
+        free_energy_per_sample = -v_term - h_term
+
+        # average over batch
+        return free_energy_per_sample.mean()
