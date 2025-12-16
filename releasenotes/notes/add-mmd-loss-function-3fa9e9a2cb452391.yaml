@@ -1,10 +1,10 @@
 ---
 features:
   - |
-    MMD loss is available in ``dwave.plugins.torch.models.losses.mmd.mmd_loss``,
-    which computes the MMD loss using a ``dwave.plugins.torch.models.losses.mmd.Kernel``
-    (specialized to the ``dwave.plugins.torch.models.losses.mmd.RBFKernel``). This
-    enables training encoders in discrete variational autoencoders to match the
-    distribution of the prior model.
+    Add a ``MaximumMeanDiscrepancyLoss`` in ``dwave.plugins.torch.nn.loss`` for estimating the
+    squared maximum mean discrepancy (MMD) for a given kernel and two samples.
+    Its functional counterpart ``maximum_mean_discrepancy_loss`` is in
+    ``dwave.plugins.torch.nn.functional``.
+    Kernels reside in ``dwave.plugins.torch.nn.modules.kernels``. This enables, for example,
+    training discrete autoencoders to match the distribution of a target distribution (e.g., prior).
 
-    
