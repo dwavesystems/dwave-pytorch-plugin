@@ -19,11 +19,12 @@ from einops import repeat
 from parameterized import parameterized
 
 from dwave.plugins.torch.models.boltzmann_machine import GraphRestrictedBoltzmannMachine
-from dwave.plugins.torch.models.discrete_variational_autoencoder import (
-    DiscreteVariationalAutoencoder as DVAE,
-)
+from dwave.plugins.torch.models.discrete_variational_autoencoder import \
+    DiscreteVariationalAutoencoder as DVAE
 from dwave.plugins.torch.models.losses.kl_divergence import pseudo_kl_divergence_loss
-from dwave.plugins.torch.models.losses.mmd import MaximumMeanDiscrepancyLoss, RadialBasisFunction, maximum_mean_discrepancy_loss
+from dwave.plugins.torch.nn.functional import maximum_mean_discrepancy_loss as mmd_loss
+from dwave.plugins.torch.nn.modules.kernels import RadialBasisFunction as RBF
+from dwave.plugins.torch.nn.modules.loss import MaximumMeanDiscrepancyLoss as MMDLoss
 from dwave.samplers import SimulatedAnnealingSampler
 
 
@@ -139,7 +140,7 @@ class TestDiscreteVariationalAutoencoder(unittest.TestCase):
         """Test training the encoder of the DVAE with MMD loss and fixed decoder and GRBM prior."""
         dvae = self.dvae_with_trainable_encoder
         optimiser = torch.optim.SGD(dvae.encoder.parameters(), lr=0.01, momentum=0.9)
-        kernel = RadialBasisFunction(num_features=5, mul_factor=2.0, bandwidth=None)
+        kernel = RBF(num_features=5, mul_factor=2.0, bandwidth=None)
         # Before training, the encoder will not map data points to the correct spin strings:
         expected_set = {(1.0, 1.0), (1.0, -1.0), (-1.0, -1.0), (-1.0, 1.0)}
         _, discretes, _ = dvae(self.data, n_samples=1)
@@ -163,10 +164,10 @@ class TestDiscreteVariationalAutoencoder(unittest.TestCase):
             )
             if use_mmd_loss_class:
                 if mmd_loss_module is None:
-                    mmd_loss_module = MaximumMeanDiscrepancyLoss(kernel)
+                    mmd_loss_module = MMDLoss(kernel)
                 mmd = mmd_loss_module(discretes, prior_samples)
             else:
-                mmd = maximum_mean_discrepancy_loss(discretes, prior_samples, kernel)
+                mmd = mmd_loss(discretes, prior_samples, kernel)
             mmd.backward()
             optimiser.step()
         # After training, the encoder should map data points to spin strings that match the samples

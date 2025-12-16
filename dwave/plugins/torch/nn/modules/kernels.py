@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Kernel functions."""
 
 from abc import abstractmethod
 from typing import Optional
@@ -20,18 +21,17 @@ import torch.nn as nn
 
 from dwave.plugins.torch.nn.modules.utils import store_config
 
-__all__ = ["Kernel", "RadialBasisFunction",
-           "maximum_mean_discrepancy_loss", "MaximumMeanDiscrepancyLoss"]
+__all__ = ["Kernel", "RadialBasisFunction"]
 
 
 class Kernel(nn.Module):
     """Base class for kernels.
 
-    Kernels are functions that compute a similarity measure between data points. Any ``Kernel``
-    subclass must implement the ``_kernel`` method, which computes the kernel matrix for a given
-    input multi-dimensional tensor with shape (n, f1, f2, ...), where n is the number of items
-    and f1, f2, ... are feature dimensions, so that the output is a tensor of shape (n, n)
-    containing the pairwise kernel values.
+    `Kernels <https://en.wikipedia.org/wiki/Kernel_method>`_ are functions that compute a similarity
+    measure between data points. Any ``Kernel`` subclass must implement the ``_kernel`` method,
+    which computes the kernel matrix for a given input multi-dimensional tensor with shape
+    (n, f1, f2, ...), where n is the number of items and f1, f2, ... are feature dimensions, so that
+    the output is a tensor of shape (n, n) containing the pairwise kernel values.
     """
 
     @abstractmethod
@@ -52,9 +52,9 @@ class Kernel(nn.Module):
     def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         """Computes kernels for all pairs between and within ``x`` and ``y``.
 
-        In general, ``x`` and ``y`` are (n_x, f1, f2, ..., fk) and (n_y, f1, f2, ..., fk)-shaped
-        tensors, and the output is a (n_x + n_y, n_x + n_y)-shaped tensor containing the pairwise
-        kernel values.
+        In general, ``x`` and ``y`` are (n_x, f1, f2, ..., fk)- and (n_y, f1, f2, ..., fk)-shaped
+        tensors, and the output is a (n_x + n_y, n_x + n_y)-shaped tensor containing pairwise kernel
+        evaluations.
 
         Args:
             x (torch.Tensor): A (n_x, f1, f2, ..., fk) tensor.
@@ -142,75 +142,3 @@ class RadialBasisFunction(Kernel):
         distance_matrix = torch.cdist(x, y, p=2)
         bandwidth = self._get_bandwidth(distance_matrix.detach()) * self.bandwidth_multipliers
         return torch.exp(-distance_matrix.unsqueeze(0) / bandwidth.reshape(-1, 1, 1)).sum(dim=0)
-
-
-def maximum_mean_discrepancy_loss(x: torch.Tensor, y: torch.Tensor, kernel: Kernel) -> torch.Tensor:
-    """Estimates the squared maximum mean discrepancy (MMD) given two samples ``x`` and ``y``.
-
-    The `squared MMD <https://dl.acm.org/doi/abs/10.5555/2188385.2188410>`_ is defined as
-
-    .. math::
-        MMD^2(X, Y) = \|E_{x\sim p}[\varphi(x)] - E_{y\sim q}[\varphi(y)] \|^2,
-
-    where :math:`\varphi` is a feature map associated with the kernel function
-    :math:`k(x, y) = \langle \varphi(x), \varphi(y) \rangle`, and :math:`p` and :math:`q` are the
-    distributions of the samples. It follows that, in terms of the kernel function, the squared MMD
-    can be computed as
-
-    .. math::
-        E_{x, x'\sim p}[k(x, x')] + E_{y, y'\sim q}[k(y, y')] - 2E_{x\sim p, y\sim q}[k(x, y)].
-
-    If :math:`p = q`, then :math:`MMD^2(X, Y) = 0`. This motivates the squared MMD as a loss
-    function for minimizing the distance between the model distribution and data distribution.
-
-    For more information, see
-    Gretton, A., Borgwardt, K. M., Rasch, M. J., Schölkopf, B., & Smola, A. (2012).
-    A kernel two-sample test. The journal of machine learning research, 13(1), 723-773.
-
-    Args:
-        x (torch.Tensor): A (n_x, f1, f2, ..., fk) tensor of samples from distribution p.
-        y (torch.Tensor): A (n_y, f1, f2, ..., fk) tensor of samples from distribution q.
-        kernel (Kernel): A kernel function object.
-
-    Returns:
-        torch.Tensor: The squared maximum mean discrepancy estimate.
-    """
-    num_x = x.shape[0]
-    num_y = y.shape[0]
-    xy = torch.cat([x, y], dim=0)
-    kernel_matrix = kernel(xy, xy)
-    kernel_xx = kernel_matrix[:num_x, :num_x]
-    kernel_yy = kernel_matrix[num_x:, num_x:]
-    kernel_xy = kernel_matrix[:num_x, num_x:]
-    xx = (kernel_xx.sum() - kernel_xx.trace()) / (num_x * (num_x - 1))
-    yy = (kernel_yy.sum() - kernel_yy.trace()) / (num_y * (num_y - 1))
-    xy = kernel_xy.sum() / (num_x * num_y)
-    return xx + yy - 2 * xy
-
-
-class MaximumMeanDiscrepancyLoss(nn.Module):
-    """An unbiased estimator for the squared maximum mean discrepancy.
-
-    This uses the ``dwave.plugins.torch.nn.functional.maximum_mean_discrepancy_loss`` function to
-    compute the loss.
-
-    Args:
-        kernel (Kernel): A kernel function object.
-    """
-
-    @store_config
-    def __init__(self, kernel: Kernel):
-        super().__init__()
-        self.kernel = kernel
-
-    def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        """Computes the MMD loss between two sets of samples x and y.
-
-        Args:
-            x (torch.Tensor): A (n_x, f1, f2, ...) tensor of samples from distribution p.
-            y (torch.Tensor): A (n_y, f1, f2, ...) tensor of samples from distribution q.
-
-        Returns:
-            torch.Tensor: The computed MMD loss.
-        """
-        return maximum_mean_discrepancy_loss(x, y, self.kernel)
