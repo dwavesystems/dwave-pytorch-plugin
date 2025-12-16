@@ -23,7 +23,7 @@ from dwave.plugins.torch.models.discrete_variational_autoencoder import (
     DiscreteVariationalAutoencoder as DVAE,
 )
 from dwave.plugins.torch.models.losses.kl_divergence import pseudo_kl_divergence_loss
-from dwave.plugins.torch.models.losses.mmd import MMDLoss, RadialBasisFunction, mmd_loss
+from dwave.plugins.torch.models.losses.mmd import MaximumMeanDiscrepancy, RadialBasisFunction, maximum_mean_discrepancy
 from dwave.samplers import SimulatedAnnealingSampler
 
 
@@ -163,10 +163,10 @@ class TestDiscreteVariationalAutoencoder(unittest.TestCase):
             )
             if use_mmd_loss_class:
                 if mmd_loss_module is None:
-                    mmd_loss_module = MMDLoss(kernel)
+                    mmd_loss_module = MaximumMeanDiscrepancy(kernel)
                 mmd = mmd_loss_module(discretes, prior_samples)
             else:
-                mmd = mmd_loss(discretes, prior_samples, kernel)
+                mmd = maximum_mean_discrepancy(discretes, prior_samples, kernel)
             mmd.backward()
             optimiser.step()
         # After training, the encoder should map data points to spin strings that match the samples

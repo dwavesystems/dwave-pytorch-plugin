@@ -20,7 +20,7 @@ import torch.nn as nn
 
 from dwave.plugins.torch.nn.modules.utils import store_config
 
-__all__ = ["Kernel", "RadialBasisFunction", "mmd_loss", "MMDLoss"]
+__all__ = ["Kernel", "RadialBasisFunction", "maximum_mean_discrepancy", "MaximumMeanDiscrepancy"]
 
 
 class Kernel(nn.Module):
@@ -35,26 +35,28 @@ class Kernel(nn.Module):
 
     @abstractmethod
     def _kernel(self, x: torch.Tensor) -> torch.Tensor:
-        """
+        """Perform a pairwise kernel evaluation over samples.
+
         Computes the kernel matrix for an input of shape (n, f1, f2, ...), whose shape is (n, n)
         containing the pairwise kernel values.
 
         Args:
-            x (torch.Tensor): A (n, f1, f2, ...) tensor.
+            x (torch.Tensor): A (n, f1, f2, ..., fk) tensor.
 
         Returns:
             torch.Tensor: A (n, n) tensor.
         """
 
     def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        """
-        Computes kernels for intra and inter set pairs in ``x`` and ``y``. In general, ``x`` and
-        ``y`` are (n_x, f1, f2, ...) and (n_y, f1, f2, ...) shaped tensors, and the output is a
-        (n_x + n_y, n_x + n_y) shaped tensor containing the pairwise kernel values.
+        """Computes kernels for all pairs between and within ``x`` and ``y``.
+
+        In general, ``x`` and ``y`` are (n_x, f1, f2, ..., fk) and (n_y, f1, f2, ..., fk)-shaped
+        tensors, and the output is a (n_x + n_y, n_x + n_y)-shaped tensor containing the pairwise
+        kernel values.
 
         Args:
-            x (torch.Tensor): A (n_x, f1, f2, ...) tensor.
-            y (torch.Tensor): A (n_y, f1, f2, ...) tensor.
+            x (torch.Tensor): A (n_x, f1, f2, ..., fk) tensor.
+            y (torch.Tensor): A (n_y, f1, f2, ..., fk) tensor.
 
         Returns:
             torch.Tensor: A (n_x + n_y, n_x + n_y) tensor.
@@ -64,13 +66,12 @@ class Kernel(nn.Module):
                 "Input dimensions must match. You are trying to compute "
                 f"the kernel between tensors of shape {x.shape} and {y.shape}."
             )
-        # Concatenate along batch dimension
         xy = torch.cat([x, y], dim=0)
         return self._kernel(xy)
 
 
 class RadialBasisFunction(Kernel):
-    """Radial basis function kernel.
+    """The radial basis function kernel.
 
     This kernel between two data points x and y is defined as
     :math:`k(x, y) = exp(-||x-y||^2 / (2 * \sigma))`, where :math:`\sigma` is the bandwidth
@@ -101,7 +102,8 @@ class RadialBasisFunction(Kernel):
 
     @torch.no_grad()
     def _get_bandwidth(self, l2_distance_matrix: torch.Tensor) -> torch.Tensor | float:
-        """
+        """Heuristically determine a bandwidth parameter as the average distance between samples.
+
         Computes the base bandwidth parameter as the average distance between samples if the
         bandwidth is not provided during initialization. Otherwise, returns the provided bandwidth.
         See https://arxiv.org/abs/1707.07269 for more details about the motivation behind taking
@@ -140,9 +142,8 @@ class RadialBasisFunction(Kernel):
         return torch.exp(-distance_matrix.unsqueeze(0) / bandwidth.reshape(-1, 1, 1)).sum(dim=0)
 
 
-def mmd_loss(x: torch.Tensor, y: torch.Tensor, kernel: Kernel) -> torch.Tensor:
-    """
-    Computes the maximum mean discrepancy (MMD) loss between two sets of samples x and y.
+def maximum_mean_discrepancy(x: torch.Tensor, y: torch.Tensor, kernel: Kernel) -> torch.Tensor:
+    """Computes the maximum mean discrepancy (MMD) loss between two sets of samples ``x`` and ``y``.
 
     This is a two-sample test to test the null hypothesis that the two samples are drawn from the
     same distribution (https://dl.acm.org/doi/abs/10.5555/2188385.2188410). The squared MMD is
@@ -184,9 +185,8 @@ def mmd_loss(x: torch.Tensor, y: torch.Tensor, kernel: Kernel) -> torch.Tensor:
     return xx + yy - 2 * xy
 
 
-class MMDLoss(nn.Module):
-    """
-    Creates a module that computes the maximum mean discrepancy (MMD) loss between two sets of
+class MaximumMeanDiscrepancy(nn.Module):
+    """Creates a module that computes the maximum mean discrepancy (MMD) loss between two sets of
     samples.
 
     This uses the `mmd_loss` function to compute the loss.
@@ -201,8 +201,7 @@ class MMDLoss(nn.Module):
         self.kernel = kernel
 
     def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        """
-        Computes the MMD loss between two sets of samples x and y.
+        """Computes the MMD loss between two sets of samples x and y.
 
         Args:
             x (torch.Tensor): A (n_x, f1, f2, ...) tensor of samples from distribution p.
@@ -211,4 +210,4 @@ class MMDLoss(nn.Module):
         Returns:
             torch.Tensor: The computed MMD loss.
         """
-        return mmd_loss(x, y, self.kernel)
+        return maximum_mean_discrepancy(x, y, self.kernel)
