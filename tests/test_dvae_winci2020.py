@@ -140,7 +140,7 @@ class TestDiscreteVariationalAutoencoder(unittest.TestCase):
         """Test training the encoder of the DVAE with MMD loss and fixed decoder and GRBM prior."""
         dvae = self.dvae_with_trainable_encoder
         optimiser = torch.optim.SGD(dvae.encoder.parameters(), lr=0.01, momentum=0.9)
-        kernel = RBF(num_features=5, mul_factor=2.0, bandwidth=None)
+        kernel = RBF(n_kernels=5, factor=2.0, bandwidth=None)
         # Before training, the encoder will not map data points to the correct spin strings:
         expected_set = {(1.0, 1.0), (1.0, -1.0), (-1.0, -1.0), (-1.0, 1.0)}
         _, discretes, _ = dvae(self.data, n_samples=1)
