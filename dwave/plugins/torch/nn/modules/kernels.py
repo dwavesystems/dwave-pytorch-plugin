@@ -18,6 +18,7 @@ from abc import abstractmethod
 import torch
 import torch.nn as nn
 
+from dwave.plugins.torch.nn.functional import DimensionMismatchError
 from dwave.plugins.torch.nn.modules.utils import store_config
 
 __all__ = ["Kernel", "RadialBasisFunction"]
@@ -32,7 +33,6 @@ class Kernel(nn.Module):
     (n, f1, f2, ...), where n is the number of items and f1, f2, ... are feature dimensions, so that
     the output is a tensor of shape (n, n) containing the pairwise kernel values.
     """
-
     @abstractmethod
     def _kernel(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         """Perform a pairwise kernel evaluation over samples.
@@ -59,11 +59,14 @@ class Kernel(nn.Module):
             x (torch.Tensor): A (n_x, f1, f2, ..., fk) tensor.
             y (torch.Tensor): A (n_y, f1, f2, ..., fk) tensor.
 
+        Raises:
+            DimensionMismatchError: If shape of ``x`` and ``y`` mismatch (excluding batch size)
+
         Returns:
             torch.Tensor: A (n_x + n_y, n_x + n_y) tensor.
         """
         if x.shape[1:] != y.shape[1:]:
-            raise ValueError(
+            raise DimensionMismatchError(
                 "Input dimensions must match. You are trying to compute "
                 f"the kernel between tensors of shape {x.shape} and {y.shape}."
             )

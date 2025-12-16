@@ -25,13 +25,21 @@ import torch
 __all__ = ["maximum_mean_discrepancy_loss"]
 
 
+class SampleSizeError(ValueError):
+    pass
+
+
+class DimensionMismatchError(ValueError):
+    pass
+
+
 def maximum_mean_discrepancy_loss(x: torch.Tensor, y: torch.Tensor, kernel: Kernel) -> torch.Tensor:
     """Estimates the squared maximum mean discrepancy (MMD) given two samples ``x`` and ``y``.
 
     The `squared MMD <https://dl.acm.org/doi/abs/10.5555/2188385.2188410>`_ is defined as
 
     .. math::
-        MMD^2(X, Y) = \|E_{x\sim p}[\varphi(x)] - E_{y\sim q}[\varphi(y)] \|^2,
+        MMD^2(X, Y) = |E_{x\sim p}[\varphi(x)] - E_{y\sim q}[\varphi(y)] |^2,
 
     where :math:`\varphi` is a feature map associated with the kernel function
     :math:`k(x, y) = \langle \varphi(x), \varphi(y) \rangle`, and :math:`p` and :math:`q` are the
@@ -53,11 +61,25 @@ def maximum_mean_discrepancy_loss(x: torch.Tensor, y: torch.Tensor, kernel: Kern
         y (torch.Tensor): A (n_y, f1, f2, ..., fk) tensor of samples from distribution q.
         kernel (Kernel): A kernel function object.
 
+    Raises:
+        SampleSizeError: If the sample size of ``x`` or ``y`` is less than two.
+        DimensionMismatchError: If shape of ``x`` and ``y`` mismatch (excluding batch size)
+
     Returns:
         torch.Tensor: The squared maximum mean discrepancy estimate.
     """
     num_x = x.shape[0]
     num_y = y.shape[0]
+    if num_x < 2 or num_y < 2:
+        raise SampleSizeError(
+            "Sample size of ``x`` and ``y`` must be at least two. "
+            f"Got, respectively, {x.shape} and {y.shape}."
+        )
+    if x.shape[1:] != y.shape[1:]:
+        raise DimensionMismatchError(
+            "Input dimensions must match. You are trying to compute "
+            f"the kernel between tensors of shape {x.shape} and {y.shape}."
+        )
     xy = torch.cat([x, y], dim=0)
     kernel_matrix = kernel(xy, xy)
     kernel_xx = kernel_matrix[:num_x, :num_x]
@@ -67,5 +89,3 @@ def maximum_mean_discrepancy_loss(x: torch.Tensor, y: torch.Tensor, kernel: Kern
     yy = (kernel_yy.sum() - kernel_yy.trace()) / (num_y * (num_y - 1))
     xy = kernel_xy.sum() / (num_x * num_y)
     return xx + yy - 2 * xy
-
-torch.nn.MSELoss

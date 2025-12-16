@@ -3,7 +3,7 @@ import unittest
 import torch
 from parameterized import parameterized
 
-from dwave.plugins.torch.nn.modules.kernels import Kernel
+from dwave.plugins.torch.nn.modules.kernels import DimensionMismatchError, Kernel
 from dwave.plugins.torch.nn.modules.kernels import RadialBasisFunction as RBF
 
 
@@ -24,7 +24,7 @@ class TestKernel(unittest.TestCase):
         one = One()
         x = torch.rand((5, 4))
         y = torch.randn((9, 3))
-        self.assertRaises(ValueError, one, x, y)
+        self.assertRaises(DimensionMismatchError, one, x, y)
 
 
 class TestRadialBasisFunction(unittest.TestCase):
