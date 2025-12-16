@@ -20,7 +20,8 @@ import torch.nn as nn
 
 from dwave.plugins.torch.nn.modules.utils import store_config
 
-__all__ = ["Kernel", "RadialBasisFunction", "maximum_mean_discrepancy", "MaximumMeanDiscrepancy"]
+__all__ = ["Kernel", "RadialBasisFunction",
+           "maximum_mean_discrepancy_loss", "MaximumMeanDiscrepancyLoss"]
 
 
 class Kernel(nn.Module):
@@ -34,17 +35,18 @@ class Kernel(nn.Module):
     """
 
     @abstractmethod
-    def _kernel(self, x: torch.Tensor) -> torch.Tensor:
+    def _kernel(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         """Perform a pairwise kernel evaluation over samples.
 
         Computes the kernel matrix for an input of shape (n, f1, f2, ...), whose shape is (n, n)
         containing the pairwise kernel values.
 
         Args:
-            x (torch.Tensor): A (n, f1, f2, ..., fk) tensor.
+            x (torch.Tensor): A (nx, f1, f2, ..., fk) tensor.
+            y (torch.Tensor): A (ny, f1, f2, ..., fk) tensor.
 
         Returns:
-            torch.Tensor: A (n, n) tensor.
+            torch.Tensor: A (nx, ny) tensor.
         """
 
     def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
@@ -66,8 +68,7 @@ class Kernel(nn.Module):
                 "Input dimensions must match. You are trying to compute "
                 f"the kernel between tensors of shape {x.shape} and {y.shape}."
             )
-        xy = torch.cat([x, y], dim=0)
-        return self._kernel(xy)
+        return self._kernel(x, y)
 
 
 class RadialBasisFunction(Kernel):
@@ -122,7 +123,7 @@ class RadialBasisFunction(Kernel):
             return l2_distance_matrix.sum() / (num_samples**2 - num_samples)
         return self.bandwidth
 
-    def _kernel(self, x: torch.Tensor) -> torch.Tensor:
+    def _kernel(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         """
         Computes the radial basis function kernel as
 
@@ -132,22 +133,21 @@ class RadialBasisFunction(Kernel):
         where :math:`\sigma_i` are the bandwidths.
 
         Args:
-            x (torch.Tensor): A (n, f1, f2, ...) tensor.
+            x (torch.Tensor): A (nx, f1, f2, ..., fk) tensor.
+            y (torch.Tensor): A (ny, f1, f2, ..., fk) tensor.
 
         Returns:
-            torch.Tensor: A (n, n) tensor representing the kernel matrix.
+            torch.Tensor: A (nx, ny) tensor representing the kernel matrix.
         """
-        distance_matrix = torch.cdist(x, x, p=2)
+        distance_matrix = torch.cdist(x, y, p=2)
         bandwidth = self._get_bandwidth(distance_matrix.detach()) * self.bandwidth_multipliers
         return torch.exp(-distance_matrix.unsqueeze(0) / bandwidth.reshape(-1, 1, 1)).sum(dim=0)
 
 
-def maximum_mean_discrepancy(x: torch.Tensor, y: torch.Tensor, kernel: Kernel) -> torch.Tensor:
-    """Computes the maximum mean discrepancy (MMD) loss between two sets of samples ``x`` and ``y``.
+def maximum_mean_discrepancy_loss(x: torch.Tensor, y: torch.Tensor, kernel: Kernel) -> torch.Tensor:
+    """Estimates the squared maximum mean discrepancy (MMD) given two samples ``x`` and ``y``.
 
-    This is a two-sample test to test the null hypothesis that the two samples are drawn from the
-    same distribution (https://dl.acm.org/doi/abs/10.5555/2188385.2188410). The squared MMD is
-    defined as
+    The `squared MMD <https://dl.acm.org/doi/abs/10.5555/2188385.2188410>`_ is defined as
 
     .. math::
         MMD^2(X, Y) = \|E_{x\sim p}[\varphi(x)] - E_{y\sim q}[\varphi(y)] \|^2,
@@ -160,22 +160,25 @@ def maximum_mean_discrepancy(x: torch.Tensor, y: torch.Tensor, kernel: Kernel) -
     .. math::
         E_{x, x'\sim p}[k(x, x')] + E_{y, y'\sim q}[k(y, y')] - 2E_{x\sim p, y\sim q}[k(x, y)].
 
-    If :math:`p = q`, then :math:`MMD^2(X, Y) = 0`. In machine learning applications, the MMD can be
-    used as a loss function to compare the distribution of model-generated samples to the
-    distribution of real data samples to force model-generated samples to match the real data
-    distribution.
+    If :math:`p = q`, then :math:`MMD^2(X, Y) = 0`. This motivates the squared MMD as a loss
+    function for minimizing the distance between the model distribution and data distribution.
+
+    For more information, see
+    Gretton, A., Borgwardt, K. M., Rasch, M. J., Schölkopf, B., & Smola, A. (2012).
+    A kernel two-sample test. The journal of machine learning research, 13(1), 723-773.
 
     Args:
-        x (torch.Tensor): A (n_x, f1, f2, ...) tensor of samples from distribution p.
-        y (torch.Tensor): A (n_y, f1, f2, ...) tensor of samples from distribution q.
+        x (torch.Tensor): A (n_x, f1, f2, ..., fk) tensor of samples from distribution p.
+        y (torch.Tensor): A (n_y, f1, f2, ..., fk) tensor of samples from distribution q.
         kernel (Kernel): A kernel function object.
 
     Returns:
-        torch.Tensor: The computed MMD loss.
+        torch.Tensor: The squared maximum mean discrepancy estimate.
     """
     num_x = x.shape[0]
     num_y = y.shape[0]
-    kernel_matrix = kernel(x, y)
+    xy = torch.cat([x, y], dim=0)
+    kernel_matrix = kernel(xy, xy)
     kernel_xx = kernel_matrix[:num_x, :num_x]
     kernel_yy = kernel_matrix[num_x:, num_x:]
     kernel_xy = kernel_matrix[:num_x, num_x:]
@@ -185,11 +188,11 @@ def maximum_mean_discrepancy(x: torch.Tensor, y: torch.Tensor, kernel: Kernel) -
     return xx + yy - 2 * xy
 
 
-class MaximumMeanDiscrepancy(nn.Module):
-    """Creates a module that computes the maximum mean discrepancy (MMD) loss between two sets of
-    samples.
+class MaximumMeanDiscrepancyLoss(nn.Module):
+    """An unbiased estimator for the squared maximum mean discrepancy.
 
-    This uses the `mmd_loss` function to compute the loss.
+    This uses the ``dwave.plugins.torch.nn.functional.maximum_mean_discrepancy_loss`` function to
+    compute the loss.
 
     Args:
         kernel (Kernel): A kernel function object.
@@ -210,4 +213,4 @@ class MaximumMeanDiscrepancy(nn.Module):
         Returns:
             torch.Tensor: The computed MMD loss.
         """
-        return maximum_mean_discrepancy(x, y, self.kernel)
+        return maximum_mean_discrepancy_loss(x, y, self.kernel)
