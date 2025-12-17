@@ -23,7 +23,7 @@ from dwave.plugins.torch.models.discrete_variational_autoencoder import \
     DiscreteVariationalAutoencoder as DVAE
 from dwave.plugins.torch.models.losses.kl_divergence import pseudo_kl_divergence_loss
 from dwave.plugins.torch.nn.functional import maximum_mean_discrepancy_loss as mmd_loss
-from dwave.plugins.torch.nn.modules.kernels import RadialBasisFunction as RBF
+from dwave.plugins.torch.nn.modules.kernels import GaussianKernel as RBF
 from dwave.plugins.torch.nn.modules.loss import MaximumMeanDiscrepancyLoss as MMDLoss
 from dwave.samplers import SimulatedAnnealingSampler
 

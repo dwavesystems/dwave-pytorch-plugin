@@ -21,7 +21,7 @@ import torch.nn as nn
 from dwave.plugins.torch.nn.functional import DimensionMismatchError
 from dwave.plugins.torch.nn.modules.utils import store_config
 
-__all__ = ["Kernel", "RadialBasisFunction"]
+__all__ = ["Kernel", "GaussianKernel"]
 
 
 class Kernel(nn.Module):
@@ -73,14 +73,14 @@ class Kernel(nn.Module):
         return self._kernel(x, y)
 
 
-class RadialBasisFunction(Kernel):
-    """The radial basis function kernel.
+class GaussianKernel(Kernel):
+    """The Gaussian kernel.
 
     This kernel between two data points x and y is defined as
     :math:`k(x, y) = exp(-||x-y||^2 / (2 * \sigma))`, where :math:`\sigma` is the bandwidth
     parameter.
 
-    This implementation considers aggregating multiple radial basis function kernels with different
+    This implementation considers aggregating multiple Gaussian kernels with different
     bandwidths. The bandwidths are determined by multiplying a base bandwidth with a set of
     multipliers. The base bandwidth can be provided directly or estimated from the data using the
     average distance between samples.
@@ -126,7 +126,7 @@ class RadialBasisFunction(Kernel):
         return self.bandwidth
 
     def _kernel(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        """Compute the radial basis function kernel between ``x`` and ``y``.
+        """Compute the Gaussian kernel between ``x`` and ``y``.
 
         .. math::
             k(x, y) = \sum_{i=1}^{num\_features} exp(-||x-y||^2 / (2 * \sigma_i)),
