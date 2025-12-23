@@ -53,9 +53,6 @@ def test_pseudo_kl_matches_reference_2d_spins():
 
     bm = DummyBoltzmannMachine()
 
-    batch_size, n_spins = 4, 6
-    logits = torch.linspace(-2.0, 2.0, steps=batch_size * n_spins).reshape(batch_size, n_spins)
-
     # spins_data: (batch_size, n_spins)
     spins_data = torch.tensor(
         [[-1, 1,-1, 1,-1, 1],
@@ -64,6 +61,10 @@ def test_pseudo_kl_matches_reference_2d_spins():
          [ 1, 1,-1,-1, 1,-1]],
         dtype=torch.float32
         )
+    
+    batch_size, n_spins = spins_data.shape
+    logits = torch.linspace(-2.0, 2.0, steps=batch_size * n_spins).reshape(batch_size, n_spins)
+
     
     spins_model = torch.ones(batch_size, n_spins, dtype=torch.float32)
 
