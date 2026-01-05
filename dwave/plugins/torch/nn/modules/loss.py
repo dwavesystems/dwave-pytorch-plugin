@@ -29,7 +29,7 @@ __all__ = ["MaximumMeanDiscrepancyLoss"]
 
 
 class MaximumMeanDiscrepancyLoss(nn.Module):
-    """An unbiased estimator for the squared maximum mean discrepancy as a loss function.
+    """An unbiased estimator for the squared maximum mean discrepancy (MMD) as a loss function.
 
     This uses the ``dwave.plugins.torch.nn.functional.maximum_mean_discrepancy_loss`` function to
     compute the loss.
@@ -44,7 +44,7 @@ class MaximumMeanDiscrepancyLoss(nn.Module):
         self.kernel = kernel
 
     def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        """Computes the MMD loss between two sets of samples x and y.
+        """Computes the MMD loss between two sets of samples ``x`` and ``y``.
 
         Args:
             x (torch.Tensor): A (n_x, f1, f2, ...) tensor of samples from distribution p.

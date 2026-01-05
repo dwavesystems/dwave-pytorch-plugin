@@ -3,7 +3,7 @@ import unittest
 import torch
 from parameterized import parameterized
 
-from dwave.plugins.torch.nn.modules.kernels import DimensionMismatchError, GaussianKernel, Kernel
+from dwave.plugins.torch.nn.modules.kernels import Kernel, GaussianKernel
 
 
 class TestKernel(unittest.TestCase):
@@ -16,6 +16,16 @@ class TestKernel(unittest.TestCase):
         y = torch.randn((9, 3))
         self.assertEqual(1, one(x, y))
 
+    @parameterized.expand([(1, 2), (2, 1)])
+    def test_sample_size(self, nx, ny):
+        class One(Kernel):
+            def _kernel(self, x, y):
+                return 1
+        one = One()
+        x = torch.rand((nx, 5))
+        y = torch.randn((ny, 5))
+        self.assertRaisesRegex(ValueError, "must be at least two", one, x, y)
+
     def test_shape_mismatch(self):
         class One(Kernel):
             def _kernel(self, x, y):
@@ -23,8 +33,7 @@ class TestKernel(unittest.TestCase):
         one = One()
         x = torch.rand((5, 4))
         y = torch.randn((9, 3))
-        self.assertRaises(DimensionMismatchError, one, x, y)
-
+        self.assertRaisesRegex(ValueError, "Input dimensions must match", one, x, y)
 
 class TestGaussianKernel(unittest.TestCase):
 

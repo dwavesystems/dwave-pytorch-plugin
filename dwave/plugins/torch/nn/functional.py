@@ -25,13 +25,6 @@ import torch
 __all__ = ["maximum_mean_discrepancy_loss"]
 
 
-class SampleSizeError(ValueError):
-    pass
-
-
-class DimensionMismatchError(ValueError):
-    pass
-
 
 def maximum_mean_discrepancy_loss(x: torch.Tensor, y: torch.Tensor, kernel: Kernel) -> torch.Tensor:
     """Estimates the squared maximum mean discrepancy (MMD) given two samples ``x`` and ``y``.
@@ -62,8 +55,8 @@ def maximum_mean_discrepancy_loss(x: torch.Tensor, y: torch.Tensor, kernel: Kern
         kernel (Kernel): A kernel function object.
 
     Raises:
-        SampleSizeError: If the sample size of ``x`` or ``y`` is less than two.
-        DimensionMismatchError: If shape of ``x`` and ``y`` mismatch (excluding batch size)
+        ValueError: If the sample size of ``x`` or ``y`` is less than two.
+        ValueError: If shape of ``x`` and ``y`` mismatch (excluding batch size)
 
     Returns:
         torch.Tensor: The squared maximum mean discrepancy estimate.
@@ -71,12 +64,12 @@ def maximum_mean_discrepancy_loss(x: torch.Tensor, y: torch.Tensor, kernel: Kern
     num_x = x.shape[0]
     num_y = y.shape[0]
     if num_x < 2 or num_y < 2:
-        raise SampleSizeError(
+        raise ValueError(
             "Sample size of ``x`` and ``y`` must be at least two. "
             f"Got, respectively, {x.shape} and {y.shape}."
         )
     if x.shape[1:] != y.shape[1:]:
-        raise DimensionMismatchError(
+        raise ValueError(
             "Input dimensions must match. You are trying to compute "
             f"the kernel between tensors of shape {x.shape} and {y.shape}."
         )

@@ -15,9 +15,8 @@ import unittest
 
 import torch
 
-from dwave.plugins.torch.nn.functional import SampleSizeError
 from dwave.plugins.torch.nn.functional import maximum_mean_discrepancy_loss as mmd_loss
-from dwave.plugins.torch.nn.modules.kernels import DimensionMismatchError, Kernel
+from dwave.plugins.torch.nn.modules.kernels import Kernel
 
 
 class TestMaximumMeanDiscrepancyLoss(unittest.TestCase):
@@ -46,13 +45,13 @@ class TestMaximumMeanDiscrepancyLoss(unittest.TestCase):
     def test_sample_size_error(self):
         x = torch.tensor([[1.2], [4.1]])
         y = torch.tensor([[0.3]])
-        self.assertRaises(SampleSizeError, mmd_loss, x, y, None)
+        self.assertRaisesRegex(ValueError, "must be at least two", mmd_loss, x, y, None)
 
     def test_mmd_loss_dim_mismatch(self):
         x = torch.tensor([[1], [4]], dtype=torch.float32)
         y = torch.tensor([[0.1, 0.2, 0.3],
                           [0.4, 0.5, 0.6]])
-        self.assertRaises(DimensionMismatchError, mmd_loss, x, y, None)
+        self.assertRaisesRegex(ValueError, "Input dimensions must match. You are trying to compute ", mmd_loss, x, y, None)
 
     def test_mmd_loss_arange(self):
         x = torch.tensor([[1.0], [4.0], [5.0]])
