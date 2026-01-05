@@ -36,7 +36,7 @@ class Kernel(ABC, nn.Module):
     def _kernel(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         """Perform a pairwise kernel evaluation over samples.
 
-        Computes the kernel matrix for an input of shape (n, f1, f2, ...), whose shape is (n, n)
+        Computes the kernel matrix for inputs of shape (nx, f1, f2, ..., fk) and (ny, f1, f2, ..., fk), whose shape is (nx, ny)
         containing the pairwise kernel values.
 
         Args:
