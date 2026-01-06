@@ -32,11 +32,13 @@ class Kernel(ABC, nn.Module):
     (n, f1, f2, ...), where n is the number of items and f1, f2, ... are feature dimensions, so that
     the output is a tensor of shape (n, n) containing the pairwise kernel values.
     """
+
     @abstractmethod
     def _kernel(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         """Perform a pairwise kernel evaluation over samples.
 
-        Computes the kernel matrix for inputs of shape (nx, f1, f2, ..., fk) and (ny, f1, f2, ..., fk), whose shape is (nx, ny)
+        Computes the kernel matrix for inputs of shape (nx, f1, f2, ..., fk) and
+        (ny, f1, f2, ..., fk), whose shape is (nx, ny)
         containing the pairwise kernel values.
 
         Args:

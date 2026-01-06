@@ -39,7 +39,7 @@ class MaximumMeanDiscrepancyLoss(nn.Module):
     """
 
     @store_config
-    def __init__(self, kernel: Kernel):
+    def __init__(self, kernel: Kernel) -> None:
         super().__init__()
         self.kernel = kernel
 
