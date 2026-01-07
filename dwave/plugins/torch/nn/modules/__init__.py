@@ -14,4 +14,5 @@
 #
 
 from dwave.plugins.torch.nn.modules.linear import *
+from dwave.plugins.torch.nn.modules.orthogonal import *
 from dwave.plugins.torch.nn.modules.utils import *
