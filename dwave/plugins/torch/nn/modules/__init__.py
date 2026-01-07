@@ -15,3 +15,4 @@
 
 from dwave.plugins.torch.nn.modules.linear import *
 from dwave.plugins.torch.nn.modules.utils import *
+from dwave.plugins.torch.nn.modules.conv import *

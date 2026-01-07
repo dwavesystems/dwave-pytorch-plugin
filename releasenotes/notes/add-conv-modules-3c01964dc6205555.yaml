@@ -1,0 +1,4 @@
+---
+features:
+  - |
+    Add ``ConvolutionBlock`` and ``SkipConv2d`` Modules.
