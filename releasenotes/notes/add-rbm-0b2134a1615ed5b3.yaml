@@ -1,0 +1,4 @@
+---
+features:
+  - Add ``Restricted Boltzmann Machine`` class for training RBMs
+    using Persistant Contrastive Divergence algorithm.
