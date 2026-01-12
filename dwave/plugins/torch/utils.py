@@ -41,3 +41,40 @@ def sampleset_to_tensor(
     permutation = [var_to_sample_i[v] for v in ordered_vars]
     sample = sample_set.record.sample[:, permutation]
     return torch.tensor(sample, dtype=torch.float32, device=device)
+
+
+def straight_through_bitrounding(fuzzy_bits):
+    if not ((fuzzy_bits >= 0) & (fuzzy_bits <= 1)).all():
+        raise ValueError(f"Inputs should be in [0, 1]: {fuzzy_bits}")
+    bits = fuzzy_bits + (fuzzy_bits.round() - fuzzy_bits).detach()
+    return bits
+
+
+def bit2spin_soft(b):
+    if not ((b >= 0) & (b <= 1)).all():
+        raise ValueError(f"Not all inputs are in [0, 1]: {b}")
+    return b * 2.0 - 1.0
+
+
+def spin2bit_soft(s):
+    if (s.abs() > 1).any():
+        raise ValueError(f"Not all inputs are in [-1, 1]: {s}")
+    return (s + 1.0) / 2.0
+
+
+def rands_like(x):
+    return rands(x.shape, device=x.device)
+
+
+def randb_like(x):
+    return randb(x.shape, device=x.device)
+
+
+def randb(shape, device=None):
+    return torch.randint(0, 2, shape, device=device)
+
+
+def rands(shape, device=None):
+    if isinstance(shape, int):
+        shape = (shape,)
+    return bit2spin_soft(torch.randint(0, 2, shape, device=device))
