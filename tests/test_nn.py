@@ -17,6 +17,8 @@ import torch
 from parameterized import parameterized
 
 from dwave.plugins.torch.nn import LinearBlock, SkipLinear, store_config
+from dwave.plugins.torch.nn.modules.utils import store_config
+from dwave.plugins.torch.nn.modules.conv import ConvolutionBlock, SkipConv2d
 from tests.helper_functions import model_probably_good
 
 
@@ -107,6 +109,65 @@ class TestLinear(unittest.TestCase):
         y = model(x)
         self.assertTrue((x == y).all())
         self.assertTrue(model_probably_good(model, (dim,), (dim, )))
+
+class TestConv(unittest.TestCase):
+    """Tests for convolutional residual modules.
+
+    The tests focus on:
+    1. Output shape correctness, and
+    2. Identity behavior of skip connections when possible.
+    """
+
+    @parameterized.expand([
+        ((3, 16, 16), 8),
+        ((8, 32, 32), 8),
+        ((16, 64, 64), 32),
+    ])
+    def test_ConvolutionBlock(self, input_shape, cout):
+        model = ConvolutionBlock(input_shape, cout)
+        self.assertTrue(
+            model_probably_good(
+                model,
+                input_shape,
+                (cout, input_shape[1], input_shape[2]),
+            )
+        )
+
+    def test_SkipConv2d_different_channels(self):
+        cin = 5
+        cout = 13
+        h = w = 17
+        model = SkipConv2d(cin, cout)
+        self.assertTrue(
+            model_probably_good(
+                model,
+                (cin, h, w),
+                (cout, h, w),
+            )
+        )
+
+    def test_SkipConv2d_identity(self):
+        # SkipConv2d behaves as identity when cin == cout
+        c = 11
+        h = w = 23
+        model = SkipConv2d(c, c)
+
+        x = torch.randn((c, h, w))
+        y = model(x)
+
+        self.assertTrue(torch.equal(x, y))
+        self.assertTrue(
+            model_probably_good(
+                model,
+                (c, h, w),
+                (c, h, w),
+            )
+        )
+
+    def test_ConvolutionBlock_non_square_raises(self):
+        # The block explicitly does not support non-square inputs
+        with self.assertRaises(NotImplementedError):
+            ConvolutionBlock((3, 16, 32), 8)
 
 
 if __name__ == "__main__":
