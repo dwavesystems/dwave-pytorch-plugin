@@ -32,6 +32,7 @@ dependencies = [
     "dimod",
     "dwave-system",
     "dwave-hybrid",
+    "einops",
 ]
 
 [project.readme]
