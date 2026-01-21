@@ -15,16 +15,17 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from dimod import Sampler
 import torch
+from dimod import Sampler
+from hybrid.composers import AggregatedSamples
 
 from dwave.plugins.torch.models.boltzmann_machine import GraphRestrictedBoltzmannMachine
 from dwave.plugins.torch.samplers._base import TorchSampler
 from dwave.plugins.torch.utils import sampleset_to_tensor
-from hybrid.composers import AggregatedSamples
 
 if TYPE_CHECKING:
     import dimod
+
     from dwave.plugins.torch.models.boltzmann_machine import GraphRestrictedBoltzmannMachine
 
 
@@ -89,10 +90,16 @@ class DimodSampler(TorchSampler):
         which is overwritten by subsequent calls.
 
         Args:
-            x (torch.Tensor): TODO
+            x (torch.Tensor): A tensor of shape (``batch_size``, ``dim``) or (``batch_size``, ``n_nodes``)
+                interpreted as a batch of partially-observed spins. Entries marked with ``torch.nan`` will
+                be sampled; entries with +/-1 values will remain constant.
         """
+        if x is not None:
+            raise NotImplementedError("Support for conditional sampling has not been implemented.")
         h, J = self._module.to_ising(self._prefactor, self._linear_range, self._quadratic_range)
-        self._sample_set = AggregatedSamples.spread(self._sampler.sample_ising(h, J, **self._sampler_params))
+        self._sample_set = AggregatedSamples.spread(
+            self._sampler.sample_ising(h, J, **self._sampler_params)
+        )
 
         # use same device as modules linear
         device = self._module._linear.device

@@ -18,6 +18,7 @@ import torch
 
 from dwave.plugins.torch.samplers._base import TorchSampler
 
+
 class TestTorchSampler(unittest.TestCase):
     """Test TorchSampler base class."""
 
@@ -67,7 +68,7 @@ class TestTorchSampler(unittest.TestCase):
                 # refresh parameters
                 super().__init__(refresh=True)
 
-            def sample(self, x: torch.Tensor | None = None): # type: ignore
+            def sample(self, x: torch.Tensor | None = None):  # type: ignore
                 pass
 
         params_obj = SubClassWithParameters()
@@ -119,7 +120,7 @@ class TestTorchSampler(unittest.TestCase):
                 # refresh parameters
                 super().__init__(refresh=True)
 
-            def sample(self, x: torch.Tensor | None = None): # type: ignore
+            def sample(self, x: torch.Tensor | None = None):  # type: ignore
                 pass
 
         module_obj = SubClassWithModule()
