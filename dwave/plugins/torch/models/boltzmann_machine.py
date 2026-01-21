@@ -32,18 +32,20 @@ from typing import TYPE_CHECKING, Hashable, Iterable, Literal, Optional, Union, 
 import torch
 
 if TYPE_CHECKING:
-    from dwave.plugins.torch.samplers.dimod_sampler import DimodSampler
     from dimod import Sampler, SampleSet
 
 from dimod import BinaryQuadraticModel
 from hybrid.composers import AggregatedSamples
 
+from dwave.plugins.torch.utils import sampleset_to_tensor
 from dwave.system.temperatures import maximum_pseudolikelihood_temperature as mple
 
 spread = AggregatedSamples.spread
 
 
 __all__ = ["GraphRestrictedBoltzmannMachine"]
+
+_SAMPLING_DEPRECATION_MESSAGE = "Use `dwave.plugins.torch.samplers` module for all sampling-related tasks instead."
 
 
 class GraphRestrictedBoltzmannMachine(torch.nn.Module):
@@ -260,6 +262,88 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         The linear and quadratic biases are concatenated in the order as defined
         by the model's input ``nodes`` and ``edges``."""
         return torch.cat([self._linear, self._quadratic])
+
+    @overload
+    def sample(self, sampler: Sampler, as_tensor: Literal[True], **kwargs) -> torch.Tensor:
+        warnings.warn(_SAMPLING_DEPRECATION_MESSAGE, DeprecationWarning)
+
+    @overload
+    def sample(self, sampler: Sampler, as_tensor: Literal[False], **kwargs) -> SampleSet:
+        warnings.warn(_SAMPLING_DEPRECATION_MESSAGE, DeprecationWarning)
+
+    def sample(
+        self,
+        sampler: Sampler,
+        *,
+        prefactor: float,
+        linear_range: Optional[tuple[float, float]] = None,
+        quadratic_range: Optional[tuple[float, float]] = None,
+        device: Optional[torch.device] = None,
+        sample_params: Optional[dict] = None,
+        as_tensor: bool = True,
+    ) -> Union[torch.Tensor, SampleSet]:
+        """Sample from the Boltzmann machine.
+
+        This method samples and converts a sample of spins to tensors and ensures they
+        are not aggregated---provided the aggregation information is retained in the
+        sample set.
+
+        Args:
+            sampler (Sampler): The sampler used to sample from the model.
+            prefactor (float): The prefactor for which the Hamiltonian is scaled by.
+                This quantity is typically the temperature at which the sampler operates
+                at. Standard CPU-based samplers such as Metropolis- or Gibbs-based
+                samplers will often default to sampling at an unit temperature, thus a
+                unit prefactor should be used. In the case of a quantum annealer, a
+                reasonable choice of a prefactor is 1/beta where beta is the effective
+                inverse temperature and can be estimated using
+                :meth:`GraphRestrictedBoltzmannMachine.estimate_beta`.
+            linear_range (tuple[float, float], optional): Linear weights are clipped to
+                ``linear_range`` prior to sampling. This clipping occurs after the ``prefactor``
+                scaling has been applied. When None, no clipping is applied. Defaults to None.
+            quadratic_range (tuple[float, float], optional): Quadratic weights are clipped to
+                ``quadratic_range`` prior to sampling. This clipping occurs after the ``prefactor``
+                scaling has been applied. When None, no clipping is applied.Defaults to None.
+            device (torch.device, optional): The device of the constructed tensor.
+                If ``None`` and data is a tensor then the device of data is used.
+                If ``None`` and data is not a tensor then the result tensor is
+                constructed on the current device.
+            sample_params (dict, optional): Parameters of the `sampler.sample` method.
+            as_tensor (bool): Whether to return the sampleset as a tensor.
+                Defaults to ``True``. If ``False`` returns a ``dimod.SampleSet``.
+
+        Returns:
+            torch.Tensor | SampleSet: Spins sampled from the model
+            (shape prescribed by ``sampler`` and ``sample_params``).
+        """
+        warnings.warn(_SAMPLING_DEPRECATION_MESSAGE, DeprecationWarning)
+        if sample_params is None:
+            sample_params = dict()
+        h, J = self.to_ising(prefactor, linear_range, quadratic_range)
+        sample_set = spread(sampler.sample_ising(h, J, **sample_params))
+
+        if as_tensor:
+            return self.sampleset_to_tensor(sample_set, device=device)
+
+        return sample_set
+
+    def sampleset_to_tensor(
+        self, sample_set: SampleSet, device: Optional[torch.device] = None
+    ) -> torch.Tensor:
+        """Converts a ``dimod.SampleSet`` to a ``torch.Tensor`` using the node order of the class.
+
+        Args:
+            sample_set (dimod.SampleSet): A sample set.
+            device (torch.device, optional): The device of the constructed tensor.
+                If ``None`` and data is a tensor then the device of data is used.
+                If ``None`` and data is not a tensor then the result tensor is constructed
+                on the current device.
+
+        Returns:
+            torch.Tensor: The sample set as a ``torch.Tensor``.
+        """
+        warnings.warn(_SAMPLING_DEPRECATION_MESSAGE, DeprecationWarning)
+        return sampleset_to_tensor(self._nodes, sample_set, device)
 
     def quasi_objective(
         self,
