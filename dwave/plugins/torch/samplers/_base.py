@@ -19,7 +19,6 @@ import torch
 
 from dwave.plugins.torch.models.boltzmann_machine import GraphRestrictedBoltzmannMachine
 
-
 __all__ = ["TorchSampler"]
 
 
