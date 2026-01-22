@@ -58,14 +58,14 @@ class DimodSampler(TorchSampler):
 
     def __init__(
             self,
-            module: GraphRestrictedBoltzmannMachine,
+            grbm: GraphRestrictedBoltzmannMachine,
             sampler: dimod.Sampler,
             prefactor: float | None = None,
             linear_range: tuple[float, float] | None = None,
             quadratic_range: tuple[float, float] | None = None,
             sample_kwargs: dict[str, Any] | None = None
     ) -> None:
-        self._module = module
+        self._grbm = grbm
 
         # use default prefactor value of 1
         self._prefactor = prefactor or 1
@@ -96,14 +96,14 @@ class DimodSampler(TorchSampler):
         """
         if x is not None:
             raise NotImplementedError("Support for conditional sampling has not been implemented.")
-        h, J = self._module.to_ising(self._prefactor, self._linear_range, self._quadratic_range)
+        h, J = self._grbm.to_ising(self._prefactor, self._linear_range, self._quadratic_range)
         self._sample_set = AggregatedSamples.spread(
             self._sampler.sample_ising(h, J, **self._sampler_params)
         )
 
         # use same device as modules linear
-        device = self._module._linear.device
-        return sampleset_to_tensor(self._module.nodes, self._sample_set, device)
+        device = self._grbm._linear.device
+        return sampleset_to_tensor(self._grbm.nodes, self._sample_set, device)
 
     @property
     def sample_set(self) -> dimod.SampleSet:
