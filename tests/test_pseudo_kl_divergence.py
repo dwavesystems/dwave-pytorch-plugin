@@ -84,7 +84,6 @@ class TestPseudoKLDivergenceLoss(unittest.TestCase):
 
         torch.testing.assert_close(out, ref)
 
-
     def test_supports_3d_spins(self):
         """Support 3D spins of shape (batch_size, n_samples, n_spins) as documented."""
         bm = DummyBoltzmannMachine()
