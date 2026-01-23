@@ -34,7 +34,7 @@ import torch.nn.functional as F
 from dwave.plugins.torch.models.losses.kl_divergence import pseudo_kl_divergence_loss
 
 
-class DummyBoltzmannMachine:
+class UnitLinearBiasObjective:
     """A minimal and deterministic stand-in for GraphRestrictedBoltzmannMachine.
 
     The purpose of this class is NOT to model a real Boltzmann machine.
