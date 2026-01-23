@@ -12,6 +12,7 @@ Boltzmann Machines are probabilistic generative models for high-dimensional bina
 The following example walks through a typical workflow for fitting Boltzmann Machines via maximum likelihood.
 
 Define a Graph-Restricted Boltzmann Machine with a cycle of length four:
+
 .. code-block:: python
     import torch
     from torch.optim import SGD
@@ -32,6 +33,7 @@ Each Markov chain samples at a constant unit inverse temperature.
     sampler = BlockSampler(grbm=grbm, crayon=lambda v: v in {"b", "d"}, num_chains=3, schedule=[1]*10)
 
 Create a batch of data and perform one likelihood-optimization step
+
 .. code-block:: python
     # Example optimization step for maximizing the likelihood of dummy data
     x_data = torch.tensor([[1, -1, 1, -1], [-1, 1, 1, 1]], dtype=torch.float32)
@@ -42,6 +44,7 @@ Create a batch of data and perform one likelihood-optimization step
     print("Updated quadratic weights:", grbm.quadratic)
 
 To use a [dimod](https://github.com/dwavesystems/dimod/) sampler, replace the `sampler = BlockSampler(...)` line with
+
 .. code-block:: python
     from dwave.plugins.torch.samplers import DimodSampler
     from dwave.samplers import RandomSampler
