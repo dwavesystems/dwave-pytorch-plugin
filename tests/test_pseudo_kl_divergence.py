@@ -147,7 +147,7 @@ class TestPseudoKLDivergenceLoss(unittest.TestCase):
         out.backward()
 
         # reference gradient from -entropy only
-        logits2 = logits.detach().clone().requires_grad_(True) 
+        logits2 = logits.detach().clone().requires_grad_(True)
         probs2 = torch.sigmoid(logits2)
         entropy2 = F.binary_cross_entropy_with_logits(logits2, probs2)
         (-entropy2).backward()
