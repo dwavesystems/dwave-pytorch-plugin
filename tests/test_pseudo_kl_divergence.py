@@ -27,6 +27,7 @@ The tests intentionally use deterministic dummy Boltzmann machines to isolate
 and validate the behavior of pseudo_kl_divergence_loss in isolation.
 """
 import unittest
+
 import torch
 import torch.nn.functional as F
 
