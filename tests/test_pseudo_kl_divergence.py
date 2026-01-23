@@ -54,7 +54,7 @@ class TestPseudoKLDivergenceLoss(unittest.TestCase):
     def test_matches_reference_2d(self):
         """Match explicit cross-entropy minus entropy reference for 2D spins."""
 
-        bm = DummyBoltzmannMachine()
+        bm = UnitLinearBiasObjective()
 
         spins_data = torch.tensor(
             [[-1, 1, -1, 1, -1, 1],
@@ -85,7 +85,7 @@ class TestPseudoKLDivergenceLoss(unittest.TestCase):
 
     def test_supports_3d_spins(self):
         """Support 3D spins of shape (batch_size, n_samples, n_spins) as documented."""
-        bm = DummyBoltzmannMachine()
+        bm = UnitLinearBiasObjective()
 
         batch_size, n_samples, n_spins = 3, 5, 4
         logits = torch.zeros(batch_size, n_spins)
