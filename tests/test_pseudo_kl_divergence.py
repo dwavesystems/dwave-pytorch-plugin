@@ -56,15 +56,15 @@ class TestPseudoKLDivergenceLoss(unittest.TestCase):
 
         bm = DummyBoltzmannMachine()
 
-        # spins_data: (batch_size, n_spins)
+```suggestion
         spins_data = torch.tensor(
-            [[-1, 1,-1, 1,-1, 1],
-            [ 1,-1, 1,-1, 1,-1],
-            [-1,-1, 1, 1,-1, 1],
-            [ 1, 1,-1,-1, 1,-1]],
+            [[-1, 1, -1, 1, -1, 1],
+             [1, -1, 1, -1, 1, -1],
+             [-1, -1, 1, 1, -1, 1],
+             [1, 1, -1, -1, 1, -1]],
             dtype=torch.float32
-            )
-        
+        )
+
         batch_size, n_spins = spins_data.shape
         logits = torch.linspace(-2.0, 2.0, steps=batch_size * n_spins).reshape(batch_size, n_spins)
 
