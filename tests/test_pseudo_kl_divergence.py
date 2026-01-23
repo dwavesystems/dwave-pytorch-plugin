@@ -91,8 +91,8 @@ class TestPseudoKLDivergenceLoss(unittest.TestCase):
 
         batch_size, n_samples, n_spins = 3, 5, 4
         logits = torch.zeros(batch_size, n_spins)
-        # Zero logits are used in the 3D shape test to keep the entropy term simple and stable (p = 0.5), 
-        # allowing the test to focus purely on documented shape support; nonzero values are covered in the 
+        # Zero logits are used in the 3D shape test to keep the entropy term simple and stable (p = 0.5),
+        # allowing the test to focus purely on documented shape support; nonzero values are covered in the
         # 2D numerical correctness test.
 
         # spins: (batch_size, n_samples, n_spins)
