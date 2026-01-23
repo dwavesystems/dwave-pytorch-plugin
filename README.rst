@@ -1,17 +1,16 @@
 D-Wave PyTorch Plugin
 =====================
 
-This plugin provides an interface between D-Wave's quantum-classical
-hybrid solvers and the PyTorch framework, including a Torch neural
-network module for building and training Boltzmann Machines along with
-various sampler utility functions.
+This plugin provides an interface between D-Wave's quantum computers and
+the PyTorch framework, including neural network modules for building
+and training Boltzmann Machines along with various sampler utility functions.
 
 Example
 -------
 Boltzmann Machines are probabilistic generative models for high-dimensional binary data.
 The following example walks through a typical workflow for fitting Boltzmann Machines via maximum likelihood.
 
-Define a Graph-Restricted Boltzmann Machine with a square graph:
+Define a Graph-Restricted Boltzmann Machine with a square graph
 
 .. code-block:: python
 
@@ -25,13 +24,16 @@ Define a Graph-Restricted Boltzmann Machine with a square graph:
     print("Linear weights:", grbm.linear)
     print("Quadratic weights:", grbm.quadratic)
 
-The following instantiates a block-Gibbs sampler.
+
+Instantiate a `block-Gibbs sampler <https://en.wikipedia.org/wiki/Gibbs_sampling#Blocked_Gibbs_sampler>`_.
 Variables "a" and "c" are in block 0; variables "b" and "d" are in block 1.
 The sampler consists of three parallel Markov chains of length ten each.
 Each Markov chain samples at a constant unit inverse temperature.
 
 .. code-block:: python
+
     sampler = BlockSampler(grbm=grbm, crayon=lambda v: v in {"b", "d"}, num_chains=3, schedule=[1]*10)
+
 
 Create a batch of data and perform one likelihood-optimization step
 
