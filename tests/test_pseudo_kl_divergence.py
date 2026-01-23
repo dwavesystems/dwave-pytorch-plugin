@@ -71,9 +71,9 @@ class TestPseudoKLDivergenceLoss(unittest.TestCase):
         spins_model = torch.ones(batch_size, n_spins, dtype=torch.float32)
 
         out = pseudo_kl_divergence_loss(
-            spins=spins_data, 
-            logits=logits, 
-            samples=spins_model, 
+            spins=spins_data,
+            logits=logits,
+            samples=spins_model,
             boltzmann_machine=bm
         )
 
