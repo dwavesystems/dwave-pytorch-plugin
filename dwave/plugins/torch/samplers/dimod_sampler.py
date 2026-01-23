@@ -60,15 +60,14 @@ class DimodSampler(TorchSampler):
             self,
             grbm: GraphRestrictedBoltzmannMachine,
             sampler: dimod.Sampler,
-            prefactor: float | None = None,
+            prefactor: float,
             linear_range: tuple[float, float] | None = None,
             quadratic_range: tuple[float, float] | None = None,
             sample_kwargs: dict[str, Any] | None = None
     ) -> None:
         self._grbm = grbm
 
-        # use default prefactor value of 1
-        self._prefactor = prefactor or 1
+        self._prefactor = prefactor
 
         self._linear_range = linear_range
         self._quadratic_range = quadratic_range
