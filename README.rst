@@ -11,7 +11,7 @@ Example
 Boltzmann Machines are probabilistic generative models for high-dimensional binary data.
 The following example walks through a typical workflow for fitting Boltzmann Machines via maximum likelihood.
 
-Define a Graph-Restricted Boltzmann Machine with a cycle of length four:
+Define a Graph-Restricted Boltzmann Machine with a square graph:
 
 .. code-block:: python
 
@@ -44,7 +44,7 @@ Create a batch of data and perform one likelihood-optimization step
     optimizer.step()
     print("Updated quadratic weights:", grbm.quadratic)
 
-To use a `dimod <https://github.com/dwavesystems/dimod/>`_ sampler, replace the `sampler = BlockSampler(...)` line with
+To use a `dimod <https://github.com/dwavesystems/dimod/>`_ sampler, replace the :code:`sampler = BlockSampler(...)` line with
 
 .. code-block:: python
 
