@@ -124,11 +124,11 @@ class TestPseudoKLDivergenceLoss(unittest.TestCase):
         """
 
         class ConstantObjectiveBM:
-            def quasi_objective(self, spins_data: torch.Tensor, 
+            def quasi_objective(self, spins_data: torch.Tensor,
                                 spins_model: torch.Tensor) -> torch.Tensor:
                 # Constant => contributes no gradient wrt logits
                 return torch.tensor(1.2345, dtype=spins_data.dtype, device=spins_data.device)
-        
+
         bm = ConstantObjectiveBM()
 
         batch_size, n_spins = 2, 3
