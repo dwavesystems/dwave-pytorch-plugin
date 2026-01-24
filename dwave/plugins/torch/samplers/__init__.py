@@ -12,6 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from dwave.plugins.torch.samplers._base import *
+from dwave.plugins.torch.samplers.base import *
 from dwave.plugins.torch.samplers.block_spin_sampler import *
 from dwave.plugins.torch.samplers.dimod_sampler import *

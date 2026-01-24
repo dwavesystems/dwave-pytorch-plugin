@@ -16,7 +16,7 @@ import unittest
 
 import torch
 
-from dwave.plugins.torch.samplers._base import TorchSampler
+from dwave.plugins.torch.samplers.base import TorchSampler
 
 
 class TestTorchSampler(unittest.TestCase):
