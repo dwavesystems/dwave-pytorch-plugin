@@ -20,7 +20,7 @@ from dimod import Sampler
 from hybrid.composers import AggregatedSamples
 
 from dwave.plugins.torch.models.boltzmann_machine import GraphRestrictedBoltzmannMachine
-from dwave.plugins.torch.samplers._base import TorchSampler
+from dwave.plugins.torch.samplers.base import TorchSampler
 from dwave.plugins.torch.utils import sampleset_to_tensor
 
 if TYPE_CHECKING:
@@ -95,6 +95,7 @@ class DimodSampler(TorchSampler):
         """
         if x is not None:
             raise NotImplementedError("Support for conditional sampling has not been implemented.")
+
         h, J = self._grbm.to_ising(self._prefactor, self._linear_range, self._quadratic_range)
         self._sample_set = AggregatedSamples.spread(
             self._sampler.sample_ising(h, J, **self._sampler_params)

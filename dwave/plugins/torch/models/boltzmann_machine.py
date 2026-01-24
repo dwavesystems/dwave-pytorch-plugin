@@ -45,8 +45,6 @@ spread = AggregatedSamples.spread
 
 __all__ = ["GraphRestrictedBoltzmannMachine"]
 
-_SAMPLING_DEPRECATION_MESSAGE = "Use `dwave.plugins.torch.samplers` module for all sampling-related tasks instead."
-
 
 class GraphRestrictedBoltzmannMachine(torch.nn.Module):
     """Creates a graph-restricted Boltzmann machine.
@@ -264,12 +262,10 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         return torch.cat([self._linear, self._quadratic])
 
     @overload
-    def sample(self, sampler: Sampler, as_tensor: Literal[True], **kwargs) -> torch.Tensor:
-        warnings.warn(_SAMPLING_DEPRECATION_MESSAGE, DeprecationWarning)
+    def sample(self, sampler: Sampler, as_tensor: Literal[True], **kwargs) -> torch.Tensor: ...
 
     @overload
-    def sample(self, sampler: Sampler, as_tensor: Literal[False], **kwargs) -> SampleSet:
-        warnings.warn(_SAMPLING_DEPRECATION_MESSAGE, DeprecationWarning)
+    def sample(self, sampler: Sampler, as_tensor: Literal[False], **kwargs) -> SampleSet: ...
 
     def sample(
         self,
@@ -316,7 +312,13 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
             torch.Tensor | SampleSet: Spins sampled from the model
             (shape prescribed by ``sampler`` and ``sample_params``).
         """
-        warnings.warn(_SAMPLING_DEPRECATION_MESSAGE, DeprecationWarning)
+        warnings.warn(
+            f"`{self.__class__}.sample()()` is deprecated since dwave-pytorch-plugin "
+            "0.3.0 and will be removed in 0.4.0. Use Use `dwave.plugins.torch.samplers` module "
+            "for all sampling-related tasks instead."
+            , DeprecationWarning
+        )
+
         if sample_params is None:
             sample_params = dict()
         h, J = self.to_ising(prefactor, linear_range, quadratic_range)
@@ -342,7 +344,13 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         Returns:
             torch.Tensor: The sample set as a ``torch.Tensor``.
         """
-        warnings.warn(_SAMPLING_DEPRECATION_MESSAGE, DeprecationWarning)
+        warnings.warn(
+            f"`{self.__class__}.sampleset_to_tensor()` is deprecated since dwave-pytorch-plugin "
+            "0.3.0 and will be removed in 0.4.0. Use Use `dwave.plugins.torch.samplers` module "
+            "for all sampling-related tasks instead."
+            , DeprecationWarning
+        )
+
         return sampleset_to_tensor(self._nodes, sample_set, device)
 
     def quasi_objective(
