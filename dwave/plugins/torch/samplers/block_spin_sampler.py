@@ -25,13 +25,14 @@ if TYPE_CHECKING:
     from dwave.plugins.torch.models.boltzmann_machine import GraphRestrictedBoltzmannMachine as GRBM
     from torch._prims_common import DeviceLikeType
 
+from dwave.plugins.torch.samplers.base import TorchSampler
 from dwave.plugins.torch.nn.functional import bit2spin_soft
 from dwave.plugins.torch.tensor import randspin
 
 __all__ = ["BlockSampler"]
 
 
-class BlockSampler:
+class BlockSampler(TorchSampler):
     """A block-spin update sampler for graph-restricted Boltzmann machines.
 
     Due to the sparse definition of GRBMs, some tedious indexing tricks are required to
@@ -68,7 +69,6 @@ class BlockSampler:
                  proposal_acceptance_criteria: Literal["Gibbs", "Metropolis"] = "Gibbs",
                  initial_states: torch.Tensor | None = None,
                  seed: int | None = None):
-        super().__init__()
 
         if num_chains < 1:
             raise ValueError("Number of reads should be a positive integer.")
@@ -99,8 +99,12 @@ class BlockSampler:
         self._x = nn.Parameter(initial_states.float(), requires_grad=False)
         self._zeros = nn.Parameter(torch.zeros((num_chains, 1)), requires_grad=False)
 
+        # call base sampler after setting parameters for correctly identifying them
+        # in super methods 'properties' and 'modules'
+        super().__init__()
+
     def to(self, device: DeviceLikeType) -> BlockSampler:
-        """Moves sampler components to the target device.
+        """Creates a sampler copy with components moved to the target device.
 
         If the device is "meta", then the random number generator (RNG)
         will not be modified at all. For all other devices, all attributes used for performing
@@ -117,17 +121,15 @@ class BlockSampler:
         Args:
             device (DeviceLikeType): The target device.
         """
-        self._x = self._x.to(device)
-        self._zeros = self._zeros.to(device)
-        self._schedule = self._schedule.to(device)
-        self._partition = self._partition.to(device)
-        self._padded_adjacencies = self._padded_adjacencies.to(device)
-        self._padded_adjacencies_weight = self._padded_adjacencies_weight.to(device)
+        sampler = super().to(device=device)
+
         if device != "meta":
             rng = torch.Generator(device)
-            rng.manual_seed(torch.randint(0, 2**60, (1,), generator=self._rng).item())
-            self._rng = rng
-        return self
+            rand_tensor = torch.randint(0, 2**60, (1,), generator=sampler._rng)
+            rng.manual_seed(int(rand_tensor.item()))
+            sampler._rng = rng
+
+        return sampler
 
     def _prepare_initial_states(
             self, num_chains: int, initial_states: torch.Tensor | None = None,
