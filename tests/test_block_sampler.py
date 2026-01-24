@@ -62,7 +62,7 @@ class TestBlockSampler(unittest.TestCase):
         crayon = self.crayon_veqa
         sample_size = 1_000_000
         bss = BlockSampler(grbm, crayon, sample_size, [1.0], "Gibbs", seed=2)
-        bss.to('meta')
+        bss = bss.to('meta')
         self.assertEqual("cpu", bss._grbm.linear.device.type)
         self.assertEqual("cpu", bss._grbm.quadratic.device.type)
         self.assertEqual("meta", bss._x.device.type)
