@@ -1,0 +1,14 @@
+---
+features:
+  - Add a samplers submodule with a baseclass ``TorchSampler``.
+  - Add a new PyTorch plugin wrapper for a dimod sampler named ``DimodSampler``.
+upgrade:
+  - Update ``BlockSampler`` to inherits from the new ``TorchSampler``.
+  - |
+    ``BlockSampler.to()`` now returns a copy with components moved to the set device, instead
+    of performing the device change it in-place.
+deprecations:
+  - |
+    Deprecate ``GraphRestrictedBoltzmannMachine.sample()`` and
+    ``GraphRestrictedBoltzmannMachine.sampleset_to_tensor`` in favour of the new
+    ``dwave.plugins.torch.samplers`` module. Will be removed in version 0.4.0."
