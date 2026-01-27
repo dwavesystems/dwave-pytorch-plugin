@@ -1,0 +1,4 @@
+---
+other:
+  - |
+    Rename the ``crayon`` argument in `BlockSampler`` to ``colouring``.
