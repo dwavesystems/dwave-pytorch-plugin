@@ -311,6 +311,10 @@ def run(*, title, loss_fn, solver, stop_grbm, num_reads,
     model.train()
     grbm.train()
 
+    # UNCOMMENT TO LOAD:
+    # grbm.load_state_dict(torch.load("grbm.pt"))
+    # model.load_state_dict(torch.load("model.pt"))
+
     opt_grbm = SGD(grbm.parameters(), lr=1e-3)
     opt_model = AdamW(model.parameters(), lr=1e-3)
 
@@ -373,6 +377,8 @@ def run(*, title, loss_fn, solver, stop_grbm, num_reads,
             save_viz(step, grbm, model, x, q)
 
             model.train()
+            torch.save(grbm.state_dict(), "grbm.pt")
+            torch.save(model.state_dict(), "model.pt")
 
 
 if __name__ == "__main__":
