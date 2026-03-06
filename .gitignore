@@ -67,3 +67,6 @@ dmypy.json
 
 # aim
 *.aim*
+
+# mlruns
+**/mlruns
