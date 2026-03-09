@@ -298,11 +298,23 @@ class BlockSampler(TorchSampler):
         self._x[:, block] = spins
 
     @torch.no_grad
-    def _step(self, beta: torch.Tensor) -> None:
+    def _step(
+        self,
+        beta: torch.Tensor,
+        mask: torch.Tensor | None = None,
+        x: torch.Tensor | None = None,
+    ) -> None:
         """Performs a block-spin update in-place.
 
         Args:
             beta (torch.Tensor): Inverse temperature to sample at.
+            mask (torch.Tensor, optional):
+                Boolean tensor of shape ``(num_chains, n_nodes)`` indicating
+                which variables are clamped. Entries set to ``True`` will keep
+                their values during sampling.
+            x (torch.Tensor, optional):
+                Tensor of shape ``(num_chains, n_nodes)`` containing the values
+                assigned to clamped variables. Only used where ``mask`` is ``True``.
         """
         for block in self._partition:
             effective_field = self._compute_effective_field(block)
@@ -315,6 +327,49 @@ class BlockSampler(TorchSampler):
                 # should've been checked on instantiation
                 raise ValueError(f"Invalid proposal acceptance criterion.")
 
+            # Restore clamped spins after update
+            if mask is not None:
+                self._x[:, block] = torch.where(mask[:, block], x[:, block], self._x[:, block])
+
+    def _validate_conditional_input(self, x: torch.Tensor) -> torch.Tensor:
+        """Validate conditional sampling input and construct a boolean mask.
+
+        This function checks that the provided tensor ``x`` is a valid
+        partially observed state for conditional sampling. Observed variables
+        must take values in ``{-1, +1}``, while unobserved variables must be
+        represented using ``NaN``. Additionally, it checks that NaN values 
+        (unclamped spins) appear in at most one block per chain.
+        Finally, it returns the clamped mask for use in sampling.
+
+        Args:
+            x (torch.Tensor): Tensor of shape (num_chains, n_nodes), with NaNs for spins to sample.
+
+        Returns:
+            torch.Tensor: Boolean mask of clamped spins.
+        """   
+        if x.shape != self._x.shape:
+            raise ValueError(
+                "x should be of shape ``num_chains, grbm.n_nodes`` "
+                f"{self._x.shape}, but got {tuple(x.shape)} instead."
+            )
+        
+        mask = ~torch.isnan(x)  # True where spin is clamped
+        
+        if not torch.all(torch.isin(x[mask], torch.tensor(list({-1, 1}), device=x.device))):
+            raise ValueError("x contains values other than ±1 or NaN")
+
+        # For each chain, count the number of blocks that contain any NaNs
+        for chain_idx in range(x.size(0)):
+            unclamped_blocks = sum(
+                (~mask[chain_idx, block]).any().item() for block in self._partition
+            )
+            if unclamped_blocks > 1:
+                raise ValueError(
+                    "Conditional sampling can only have unclamped spins in a single block per chain."
+                )
+
+        return mask
+    
     @torch.no_grad
     def sample(self, x: torch.Tensor | None = None) -> torch.Tensor:
         """Performs block updates.
@@ -328,7 +383,11 @@ class BlockSampler(TorchSampler):
             torch.Tensor: A tensor of shape (batch_size, dim) of +/-1 values sampled from the model.
         """
         if x is not None:
-            raise NotImplementedError("Support for conditional sampling has not been implemented.")
+            mask = self._validate_conditional_input(x)
+            # Initialize state with clamped spins
+            self._x.data[:] = torch.where(mask, x, self._x)
+        else:
+            mask = None
         for beta in self._schedule:
-            self._step(beta)
+            self._step(beta, mask, x)
         return self._x

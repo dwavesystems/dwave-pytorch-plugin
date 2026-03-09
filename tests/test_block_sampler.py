@@ -269,6 +269,77 @@ class TestBlockSampler(unittest.TestCase):
     def test_invalid_num_reads(self, grbm, crayon):
         self.assertRaisesRegex(ValueError, "should be a positive integer", BlockSampler, grbm, crayon, 0, [1.0])
 
+    def test_validate_conditional_input(self):
+        nodes = ["v1", "v2", "h1", "h2"]
+        edges = [["v1", "h1"], ["v1", "h2"], ["v2", "h1"], ["v2", "h2"]]
+        grbm = GRBM(nodes, edges, hidden_nodes=["h1", "h2"])
+
+        def crayon(n):
+            return 0 if n in ["v1", "v2"] else 1
+
+        sampler = BlockSampler(grbm, crayon, num_chains=2, schedule=[1.0])
+
+        # Case 1: Valid single block unclamped
+        x_valid = torch.tensor([
+            [float('nan'), float('nan'), 1.0, 1.0],
+            [1.0, 1.0, float('nan'), float('nan')]
+        ])
+
+        mask = sampler._validate_conditional_input(x_valid)
+        self.assertEqual(mask.shape, x_valid.shape)
+
+        # Chain 0: visible unclamped
+        self.assertTrue(mask[0, 2:].all()) # First chain: hidden spins are clamped
+
+        # Chain 1: hidden unclamped
+        self.assertTrue(mask[1, :2].all()) # Second chain: visible spins are clamped
+
+        # Case 2: All spins clamped 
+        x_all_clamped = torch.tensor([
+            [1.0, -1.0, 1.0, -1.0],
+            [1.0, 1.0, -1.0, -1.0]
+        ])
+        mask = sampler._validate_conditional_input(x_all_clamped)
+        self.assertTrue(mask.all())
+
+        # Case 3: Invalid multiple blocks unclamped 
+        x_invalid = torch.tensor([
+            [float('nan'), 1.0, float('nan'), 1.0],  # unclamped in both visible & hidden
+            [1.0, float('nan'), float('nan'), 1.0]   # unclamped in both visible & hidden
+        ])
+        with self.assertRaisesRegex(ValueError, "unclamp"):
+            sampler._validate_conditional_input(x_invalid)
+
+        # Case 4: Shape mismatch 
+        x_wrong_shape = torch.tensor([[float('nan'), 1.0]])
+        with self.assertRaisesRegex(ValueError, "shape"):
+            sampler._validate_conditional_input(x_wrong_shape)
+        
+    def test_sample_conditional_three_blocks(self):
+        # Triangle graph
+        nodes = ["a", "b", "c"]
+        edges = [["a", "b"], ["b", "c"], ["a", "c"]]
+        grbm = GRBM(nodes, edges)
+
+        # 3-coloring
+        def crayon(n):
+            return {"a": 0, "b": 1, "c": 2}[n]
+
+        sampler = BlockSampler(grbm, crayon, 2, [1.0], "Gibbs", seed=123)
+
+        # Chain 0 unclamps block 0
+        # Chain 1 unclamps block 2
+        x = torch.tensor([
+            [float("nan"),  1.0,  1.0],
+            [ 1.0,          1.0, float("nan")]
+        ])
+
+        result = sampler.sample(x)
+        
+        # Ensure clamped spins remain unchanged
+        mask = ~torch.isnan(x)
+        print('mask , ', mask)
+        torch.testing.assert_close(result[mask], x[mask])
 
 if __name__ == "__main__":
     unittest.main()
