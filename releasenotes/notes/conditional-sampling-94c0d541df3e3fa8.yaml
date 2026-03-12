@@ -1,7 +1,7 @@
 ---
 features:
   - |
-    Add ``BipartiteSampler`` for performing Gibbs sampling of
+    Add ``BipartiteGibbsSampler`` for performing Gibbs sampling of
     bipartite graph-restricted Boltzmann Machines.
   - |
     Add conditional sampling functionality for the ``BlockSampler``.

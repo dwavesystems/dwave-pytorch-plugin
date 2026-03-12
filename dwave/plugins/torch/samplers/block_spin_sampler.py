@@ -146,9 +146,9 @@ class BlockSampler(TorchSampler):
             generator (torch.Generator | None): A random number generator.
 
         Raises:
-            ShapeMismatchError: If the shape of initial states do not match that of the expected
-                (``num_chains``, ``self._grbm.n_nodes``).
-            NonSpinError: If the provided initial states have nonspin-valued entries.
+            ValueError: If the shape of initial states does not match that of the expected
+                (``num_chains``, ``self._grbm.n_nodes``) or if the provided initial states 
+                have nonspin-valued entries.
 
         Returns:
             torch.Tensor: The initial states of the sampler's Markov chain.
@@ -308,13 +308,12 @@ class BlockSampler(TorchSampler):
 
         Args:
             beta (torch.Tensor): Inverse temperature to sample at.
-            mask (torch.Tensor, optional):
-                Boolean tensor of shape ``(num_chains, n_nodes)`` indicating
-                which variables are clamped. Entries set to ``True`` will keep
-                their values during sampling.
-            x (torch.Tensor, optional):
-                Tensor of shape ``(num_chains, n_nodes)`` containing the values
-                assigned to clamped variables. Only used where ``mask`` is ``True``.
+            mask (torch.Tensor, optional): Boolean tensor of shape 
+                ``(num_chains, n_nodes)`` indicating which variables are clamped.
+                Entries set to ``True`` will keep their values during sampling.
+            x (torch.Tensor, optional): Tensor of shape ``(num_chains, n_nodes)``
+                containing the values assigned to clamped variables. Only used
+                where ``mask`` is ``True``.
         """
         for block in self._partition:
             effective_field = self._compute_effective_field(block)
@@ -331,7 +330,7 @@ class BlockSampler(TorchSampler):
             if mask is not None:
                 self._x[:, block] = torch.where(mask[:, block], x[:, block], self._x[:, block])
 
-    def _validate_conditional_input(self, x: torch.Tensor) -> torch.Tensor:
+    def _validate_input_and_generate_mask(self, x: torch.Tensor) -> torch.Tensor:
         """Validate conditional sampling input and construct a boolean mask.
 
         This function checks that the provided tensor ``x`` is a valid
@@ -358,16 +357,20 @@ class BlockSampler(TorchSampler):
         if not torch.all(torch.isin(x[mask], torch.tensor(list({-1, 1}), device=x.device))):
             raise ValueError("x contains values other than ±1 or NaN")
 
-        # For each chain, count the number of blocks that contain any NaNs
-        for chain_idx in range(x.size(0)):
-            unclamped_blocks = sum(
-                (~mask[chain_idx, block]).any().item() for block in self._partition
-            )
-            if unclamped_blocks > 1:
-                raise ValueError(
-                    "Conditional sampling can only have unclamped spins in a single block per chain."
-                )
+        # For each block, determine which chains have at least one unclamped spin (NaN) in that block. 
+        unclamped_per_block = torch.stack([
+            (~mask[:, block]).any(dim=1) for block in self._partition
+        ], dim=1)
 
+        # Count how many blocks are unclamped per chain
+        unclamped_count = unclamped_per_block.sum(dim=1)
+
+        # Raise error if any chain has more than 1 unclamped block
+        if (unclamped_count > 1).any():
+            raise ValueError(
+                "Conditional sampling can only have unclamped spins in a single block per chain."
+            )
+        
         return mask
     
     @torch.no_grad
@@ -383,11 +386,11 @@ class BlockSampler(TorchSampler):
             torch.Tensor: A tensor of shape (batch_size, dim) of +/-1 values sampled from the model.
         """
         if x is not None:
-            mask = self._validate_conditional_input(x)
+            mask = self._validate_input_and_generate_mask(x)
             # Initialize state with clamped spins
             self._x.data[:] = torch.where(mask, x, self._x)
         else:
             mask = None
         for beta in self._schedule:
             self._step(beta, mask, x)
-        return self._x
+        return self._x.clone()
