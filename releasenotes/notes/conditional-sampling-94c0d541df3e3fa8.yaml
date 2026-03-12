@@ -1,0 +1,8 @@
+---
+features:
+  - |
+    Add ``BipartiteGibbsSampler`` for performing Gibbs sampling of
+    bipartite graph-restricted Boltzmann Machines.
+  - |
+    Add conditional sampling functionality for the ``BlockSampler``.
+
