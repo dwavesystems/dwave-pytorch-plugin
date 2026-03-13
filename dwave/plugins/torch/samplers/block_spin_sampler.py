@@ -174,6 +174,8 @@ class BlockSampler(TorchSampler):
             bool: True if the colouring is valid and False otherwise.
         """
         for u, v in self._grbm.edges:
+            if u == v:
+                continue
             if self._colouring(u) == self._colouring(v):
                 return False
         return True
