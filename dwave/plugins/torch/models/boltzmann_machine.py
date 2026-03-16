@@ -26,8 +26,10 @@
 
 from __future__ import annotations
 
+import math
 import warnings
-from typing import TYPE_CHECKING, Hashable, Iterable, Literal, Optional, Union, overload
+from typing import (TYPE_CHECKING, Hashable, Iterable, Literal, Optional,
+                    Union, overload)
 
 import torch
 
@@ -38,7 +40,8 @@ from dimod import BinaryQuadraticModel
 from hybrid.composers import AggregatedSamples
 
 from dwave.plugins.torch.utils import sampleset_to_tensor
-from dwave.system.temperatures import maximum_pseudolikelihood_temperature as mple
+from dwave.system.temperatures import \
+    maximum_pseudolikelihood_temperature as mple
 
 spread = AggregatedSamples.spread
 
@@ -676,3 +679,215 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         bqm = BinaryQuadraticModel.from_ising(*self.to_ising(1))
         beta = 1 / mple(bqm, (spins.detach().cpu().numpy(), self._nodes))[0]
         return beta
+
+    def estimate_data_n_samples(self, delta: float, target_precision: float) -> int:
+        r"""Estimate the number of data samples that should be used to estimate energy expectations
+        to within a target precision with probability at least 1 - delta.
+
+        Uses `<Hoeffding's inequality https://en.wikipedia.org/wiki/Hoeffding%27s_inequality>`_ to
+        estimate the number of samples required to ensure that the
+        empirical mean of the sufficient statistics of the data is within an additive error of
+        ``target_precision`` of the true mean with probability at least 1 - delta. More precisely,
+        if :math:`\kappa` is the target precision, :math:`\delta` is the probability of the estimate
+        being outside the target precision, :math:`B` is the maximum absolute value of the
+        sufficient statistics, and :math:`m` is the number of parameters in the model, then the
+        number of samples required is at least
+
+        .. math::
+            M \geq \frac{2B^2}{\kappa^2}\log\left(\frac{2m}{\delta}\right).
+
+        Args:
+            delta (float): The probability of the estimate being outside the target precision. Must
+                be between 0 and 1.
+            target_precision (float): The desired maximum additive error of the energy expectation
+            estimate.
+
+        Returns:
+            int: The estimated number of data samples required.
+        """
+        # Maximum absolute value of the sufficient statistics is upper bounded by the maximum
+        # absolute value of the linear and quadratic biases. This is because the sufficient
+        # statistics are simply the spins and interactions of the model and the spins and
+        # interactions are bounded by 1 in absolute value, but the linear and quadratic biases can
+        # be arbitrarily large and thus can scale the sufficient statistics arbitrarily:
+        B = max(self.linear.abs().max(), self.quadratic.abs().max()).item()
+        m = self.n_edges + self.n_nodes  # Number of parameters
+        if not (0 < delta < 1):
+            raise ValueError(f"delta must be between 0 and 1. You passed delta={delta}")
+        if target_precision <= 0:
+            raise ValueError(
+                "target_precision must be a positive float. You passed "
+                f"target_precision={target_precision}"
+            )
+        return math.ceil(
+            (2.0 * B * B / (target_precision * target_precision)) * math.log((2.0 * m) / delta)
+        )
+
+    def estimate_optimal_learning_rate(
+        self,
+        data_target_precision: float,
+        grbm_target_precision: float,
+        difference_target_precision: float,
+    ) -> float:
+        """Estimate the optimal learning rate for training a fully-visible GRBM.
+
+        See `<Theorem 1 https://doi.org/10.1038/s42005-024-01763-x>`_ for more details.
+
+        Args:
+            data_target_precision (float): The desired maximum additive error of the energy
+                expectation estimate for the data term.
+            grbm_target_precision (float): The desired maximum additive error of the energy
+                expectation estimate for the GRBM term.
+            difference_target_precision (float): The desired maximum additive error of the
+                difference between the data and GRBM terms.
+
+        Returns:
+            float: The estimated optimal learning rate.
+        """
+        if data_target_precision <= 0:
+            raise ValueError(
+                "data_target_precision must be a positive float. You passed "
+                f"data_target_precision={data_target_precision}"
+            )
+        if grbm_target_precision <= 0:
+            raise ValueError(
+                "grbm_target_precision must be a positive float. You passed "
+                f"grbm_target_precision={grbm_target_precision}"
+            )
+        if difference_target_precision <= 0:
+            raise ValueError(
+                "difference_target_precision must be a positive float. You passed "
+                f"difference_target_precision={difference_target_precision}"
+            )
+        noise_power = data_target_precision**2 + grbm_target_precision**2
+        m = self.n_edges + self.n_nodes  # Number of parameters
+        gamma = difference_target_precision / (4 * m * m * noise_power)
+        return gamma
+
+    def estimate_opt_steps(
+        self,
+        delta0: float,
+        data_target_precision: float,
+        grbm_target_precision: float,
+        difference_target_precision: float,
+    ) -> int:
+        """Estimate number of optimisation steps to guarantee convergence of fully-visible GRBM
+        training.
+
+        See `<Theorem 1 https://doi.org/10.1038/s42005-024-01763-x>`_ for more details.
+
+        Args:
+            delta0 (float): Initial quantum relative entropy difference between the untrained model
+                and the optimal model. Must be positive. In the paper by Coopmans and Benedetti,
+                delta0 is around 3 for a small 8-qubit model.
+            data_target_precision (float): The desired maximum additive error of the energy
+                expectation estimate for the data term.
+            grbm_target_precision (float): The desired maximum additive error of the energy
+                expectation estimate for the GRBM term.
+            difference_target_precision (float): The desired maximum additive error of the
+                difference between the data and GRBM terms.
+
+        Returns:
+            int: The estimated number of optimization steps.
+        """
+        if delta0 <= 0:
+            raise ValueError(f"delta0 must be positive. You passed delta0={delta0}")
+        if data_target_precision <= 0:
+            raise ValueError(
+                f"data_target_precision must be positive. You passed "
+                f"data_target_precision={data_target_precision}"
+            )
+        if grbm_target_precision <= 0:
+            raise ValueError(
+                f"grbm_target_precision must be positive. You passed "
+                f"grbm_target_precision={grbm_target_precision}"
+            )
+        if difference_target_precision <= 0:
+            raise ValueError(
+                f"difference_target_precision must be positive. You passed "
+                f"difference_target_precision={difference_target_precision}"
+            )
+        m = self.n_edges + self.n_nodes  # Number of parameters
+        noise_power = data_target_precision**2 + grbm_target_precision**2
+        return math.ceil(48 * delta0 * m * m * noise_power / (difference_target_precision**4))
+
+    def estimate_grbm_n_samples(
+        self,
+        grbm_target_precision: float,
+        success_probability: float,
+        total_opt_steps: int | None = None,
+        delta0: float | None = None,
+        data_target_precision: float | None = None,
+        difference_target_precision: float | None = None,
+    ) -> int:
+        """Estimate the number of GRBM samples required to guarantee convergence of fully-visible
+        GRBM training with a given success probability.
+
+        See `<Theorem 1 https://doi.org/10.1038/s42005-024-01763-x>`_ for more details.
+
+        Args:
+            grbm_target_precision (float): The desired maximum additive error of the energy
+                expectation estimate for the GRBM term.
+            success_probability (float): The desired probability of successful convergence.
+            total_opt_steps (int | None, optional): The total number of optimization steps. If None,
+                it will be estimated based on the other parameters. Defaults to None.
+            delta0 (float | None, optional): The initial quantum relative entropy difference between
+                the untrained model and the optimal model. Must be a positive float if
+                total_opt_steps is None. Defaults to None.
+            data_target_precision (float | None, optional): The desired maximum additive error of
+                the energy expectation estimate for the data term. Must be a positive float if
+                total_opt_steps is None. Defaults to None.
+            difference_target_precision (float | None, optional): The desired maximum additive error
+                of the difference between the data and GRBM terms. Must be a positive float if
+                total_opt_steps is None. Defaults to None.
+
+        Returns:
+            int: The estimated number of GRBM samples required.
+        """
+        if grbm_target_precision <= 0:
+            raise ValueError(
+                "grbm_target_precision must be a positive float. You passed "
+                f"grbm_target_precision={grbm_target_precision}"
+            )
+        if not (0 < success_probability < 1):
+            raise ValueError(
+                f"success_probability must be between 0 and 1. You passed "
+                f"success_probability={success_probability}"
+            )
+
+        if total_opt_steps is None:
+            if delta0 is None:
+                raise ValueError("delta0 must be provided if total_opt_steps is not provided.")
+            if data_target_precision is None:
+                raise ValueError(
+                    "data_target_precision must be provided if total_opt_steps is not provided."
+                )
+            if difference_target_precision is None:
+                raise ValueError(
+                    "difference_target_precision must be provided if total_opt_steps is not "
+                    "provided."
+                )
+            if delta0 <= 0:
+                raise ValueError(f"delta0 must be positive. You passed delta0={delta0}")
+            if data_target_precision <= 0:
+                raise ValueError(
+                    "data_target_precision must be a positive float. You passed "
+                    f"data_target_precision={data_target_precision}"
+                )
+            if difference_target_precision <= 0:
+                raise ValueError(
+                    "difference_target_precision must be a positive float. You passed "
+                    f"difference_target_precision={difference_target_precision}"
+                )
+            total_opt_steps = self.estimate_opt_steps(
+                delta0=delta0,
+                data_target_precision=data_target_precision,
+                grbm_target_precision=grbm_target_precision,
+                difference_target_precision=difference_target_precision,
+            )
+        m = self.n_edges + self.n_nodes  # Number of parameters
+        return math.ceil(
+            1
+            / (grbm_target_precision**4)
+            * math.log(m / (1 - success_probability ** (1 / total_opt_steps)))
+        )
