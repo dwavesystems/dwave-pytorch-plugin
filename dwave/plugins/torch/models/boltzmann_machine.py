@@ -28,7 +28,8 @@ from __future__ import annotations
 
 import math
 import warnings
-from typing import TYPE_CHECKING, Hashable, Iterable, Literal, Optional, Union, overload
+from typing import (TYPE_CHECKING, Hashable, Iterable, Literal, Optional,
+                    Union, overload)
 
 import torch
 
@@ -39,7 +40,8 @@ from dimod import BinaryQuadraticModel
 from hybrid.composers import AggregatedSamples
 
 from dwave.plugins.torch.utils import sampleset_to_tensor
-from dwave.system.temperatures import maximum_pseudolikelihood_temperature as mple
+from dwave.system.temperatures import \
+    maximum_pseudolikelihood_temperature as mple
 
 spread = AggregatedSamples.spread
 
@@ -679,10 +681,11 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         return beta
 
     def estimate_data_n_samples(self, delta: float, target_precision: float) -> int:
-        """Estimate the number of data samples that should be used to estimate energy expectations
+        r"""Estimate the number of data samples that should be used to estimate energy expectations
         to within a target precision with probability at least 1 - delta.
 
-        Uses Hoeffding's inequality to estimate the number of samples required to ensure that the
+        Uses `<Hoeffding's inequality https://en.wikipedia.org/wiki/Hoeffding%27s_inequality>`_ to
+        estimate the number of samples required to ensure that the
         empirical mean of the sufficient statistics of the data is within an additive error of
         ``target_precision`` of the true mean with probability at least 1 - delta. More precisely,
         if :math:`\kappa` is the target precision, :math:`\delta` is the probability of the estimate
@@ -728,7 +731,7 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
     ) -> float:
         """Estimate the optimal learning rate for training a fully-visible GRBM.
 
-        See https://doi.org/10.1038/s42005-024-01763-x for more details.
+        See `<Theorem 1 https://doi.org/10.1038/s42005-024-01763-x>`_ for more details.
 
         Args:
             data_target_precision (float): The desired maximum additive error of the energy
@@ -771,7 +774,7 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         """Estimate number of optimisation steps to guarantee convergence of fully-visible GRBM
         training.
 
-        See https://doi.org/10.1038/s42005-024-01763-x for more details.
+        See `<Theorem 1 https://doi.org/10.1038/s42005-024-01763-x>`_ for more details.
 
         Args:
             delta0 (float): Initial quantum relative entropy difference between the untrained model
@@ -820,7 +823,7 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         """Estimate the number of GRBM samples required to guarantee convergence of fully-visible
         GRBM training with a given success probability.
 
-        See https://doi.org/10.1038/s42005-024-01763-x for more details.
+        See `<Theorem 1 https://doi.org/10.1038/s42005-024-01763-x>`_ for more details.
 
         Args:
             grbm_target_precision (float): The desired maximum additive error of the energy
