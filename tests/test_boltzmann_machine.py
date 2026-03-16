@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import math
 import unittest
 
 import torch
@@ -127,6 +128,305 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
             1.0 / mple(bqm, (spins.numpy(), "dbac"))[0],
             self.bm.estimate_beta(spins),
         )
+
+    def test_estimate_data_n_samples(self):
+        with self.subTest("Matches Hoeffding-based sample estimate"):
+            delta = 0.1
+            target_precision = 0.5
+            B = max(self.bm.linear.abs().max(), self.bm.quadratic.abs().max()).item()
+            m = self.bm.n_edges + self.bm.n_nodes
+            expected = math.ceil(
+                (2.0 * B * B / (target_precision * target_precision)) * math.log((2.0 * m) / delta)
+            )
+            self.assertEqual(expected, self.bm.estimate_data_n_samples(delta, target_precision))
+
+        for bad_delta in (0.0, 1.0, -0.1, 1.1):
+            with self.subTest(f"Invalid delta raises for delta={bad_delta}"):
+                with self.assertRaisesRegex(ValueError, "delta must be between 0 and 1"):
+                    self.bm.estimate_data_n_samples(bad_delta, 0.5)
+
+        for bad_target_precision in (0.0, -0.1):
+            with self.subTest(
+                f"Invalid target_precision raises for target_precision={bad_target_precision}"
+            ):
+                with self.assertRaisesRegex(
+                    ValueError, "target_precision must be a positive float"
+                ):
+                    self.bm.estimate_data_n_samples(0.1, bad_target_precision)
+
+    def test_estimate_optimal_learning_rate(self):
+        with self.subTest("Matches closed-form learning-rate estimate"):
+            data_target_precision = 0.1
+            grbm_target_precision = 0.2
+            difference_target_precision = 0.05
+            noise_power = data_target_precision**2 + grbm_target_precision**2
+            m = self.bm.n_edges + self.bm.n_nodes
+            expected = difference_target_precision / (4 * m * m * noise_power)
+            self.assertEqual(
+                expected,
+                self.bm.estimate_optimal_learning_rate(
+                    data_target_precision,
+                    grbm_target_precision,
+                    difference_target_precision,
+                ),
+            )
+
+        for bad_data_precision in (0.0, -0.1):
+            with self.subTest(f"Invalid data_target_precision raises for {bad_data_precision}"):
+                with self.assertRaisesRegex(
+                    ValueError, "data_target_precision must be a positive float"
+                ):
+                    self.bm.estimate_optimal_learning_rate(bad_data_precision, 0.2, 0.05)
+
+        for bad_grbm_precision in (0.0, -0.1):
+            with self.subTest(f"Invalid grbm_target_precision raises for {bad_grbm_precision}"):
+                with self.assertRaisesRegex(
+                    ValueError, "grbm_target_precision must be a positive float"
+                ):
+                    self.bm.estimate_optimal_learning_rate(0.1, bad_grbm_precision, 0.05)
+
+        for bad_diff_precision in (0.0, -0.1):
+            with self.subTest(
+                f"Invalid difference_target_precision raises for {bad_diff_precision}"
+            ):
+                with self.assertRaisesRegex(
+                    ValueError, "difference_target_precision must be a positive float"
+                ):
+                    self.bm.estimate_optimal_learning_rate(0.1, 0.2, bad_diff_precision)
+
+    def test_estimate_opt_steps(self):
+        with self.subTest("Matches closed-form optimization-steps estimate"):
+            delta0 = 3.0
+            data_target_precision = 0.1
+            grbm_target_precision = 0.2
+            difference_target_precision = 0.05
+            m = self.bm.n_edges + self.bm.n_nodes
+            noise_power = data_target_precision**2 + grbm_target_precision**2
+            expected = math.ceil(
+                48 * delta0 * m * m * noise_power / (difference_target_precision**4)
+            )
+            self.assertEqual(
+                expected,
+                self.bm.estimate_opt_steps(
+                    delta0,
+                    data_target_precision,
+                    grbm_target_precision,
+                    difference_target_precision,
+                ),
+            )
+
+        with self.subTest("Invalid delta0 raises"):
+            with self.assertRaisesRegex(ValueError, "delta0 must be positive"):
+                self.bm.estimate_opt_steps(0.0, 0.1, 0.2, 0.05)
+
+        with self.subTest("Invalid data_target_precision raises"):
+            with self.assertRaisesRegex(ValueError, "data_target_precision must be positive"):
+                self.bm.estimate_opt_steps(3.0, 0.0, 0.2, 0.05)
+
+        with self.subTest("Invalid grbm_target_precision raises"):
+            with self.assertRaisesRegex(ValueError, "grbm_target_precision must be positive"):
+                self.bm.estimate_opt_steps(3.0, 0.1, 0.0, 0.05)
+
+        with self.subTest("Invalid difference_target_precision raises"):
+            with self.assertRaisesRegex(ValueError, "difference_target_precision must be positive"):
+                self.bm.estimate_opt_steps(3.0, 0.1, 0.2, 0.0)
+
+    def test_estimate_grbm_n_samples(self):
+        with self.subTest("Matches closed-form estimate with explicit total_opt_steps"):
+            grbm_target_precision = 0.2
+            success_probability = 0.9
+            total_opt_steps = 10
+            m = self.bm.n_edges + self.bm.n_nodes
+            expected = math.ceil(
+                1
+                / (grbm_target_precision**4)
+                * math.log(m / (1 - success_probability ** (1 / total_opt_steps)))
+            )
+            self.assertEqual(
+                expected,
+                self.bm.estimate_grbm_n_samples(
+                    grbm_target_precision,
+                    success_probability,
+                    total_opt_steps=total_opt_steps,
+                ),
+            )
+
+        with self.subTest("Computes total_opt_steps when not provided"):
+            grbm_target_precision = 0.2
+            success_probability = 0.9
+            delta0 = 3.0
+            data_target_precision = 0.1
+            difference_target_precision = 0.05
+            total_opt_steps = self.bm.estimate_opt_steps(
+                delta0,
+                data_target_precision,
+                grbm_target_precision,
+                difference_target_precision,
+            )
+            m = self.bm.n_edges + self.bm.n_nodes
+            expected = math.ceil(
+                1
+                / (grbm_target_precision**4)
+                * math.log(m / (1 - success_probability ** (1 / total_opt_steps)))
+            )
+            self.assertEqual(
+                expected,
+                self.bm.estimate_grbm_n_samples(
+                    grbm_target_precision,
+                    success_probability,
+                    delta0=delta0,
+                    data_target_precision=data_target_precision,
+                    difference_target_precision=difference_target_precision,
+                ),
+            )
+
+        for bad_grbm_precision in (0.0, -0.1):
+            with self.subTest(f"Invalid grbm_target_precision raises for {bad_grbm_precision}"):
+                with self.assertRaisesRegex(
+                    ValueError, "grbm_target_precision must be a positive float"
+                ):
+                    self.bm.estimate_grbm_n_samples(bad_grbm_precision, 0.9, total_opt_steps=10)
+
+        for bad_success_probability in (0.0, 1.0, -0.1, 1.1):
+            with self.subTest(
+                "Invalid success_probability raises for "
+                f"success_probability={bad_success_probability}"
+            ):
+                with self.assertRaisesRegex(
+                    ValueError, "success_probability must be between 0 and 1"
+                ):
+                    self.bm.estimate_grbm_n_samples(
+                        0.2, bad_success_probability, total_opt_steps=10
+                    )
+
+        with self.subTest("Missing delta0 when total_opt_steps is omitted raises"):
+            with self.assertRaisesRegex(
+                ValueError, "delta0 must be provided if total_opt_steps is not provided"
+            ):
+                self.bm.estimate_grbm_n_samples(
+                    0.2,
+                    0.9,
+                    data_target_precision=0.1,
+                    difference_target_precision=0.05,
+                )
+
+        with self.subTest("Missing data_target_precision when total_opt_steps is omitted raises"):
+            with self.assertRaisesRegex(
+                ValueError,
+                "data_target_precision must be provided if total_opt_steps is not provided",
+            ):
+                self.bm.estimate_grbm_n_samples(
+                    0.2,
+                    0.9,
+                    delta0=3.0,
+                    difference_target_precision=0.05,
+                )
+
+        with self.subTest(
+            "Missing difference_target_precision when total_opt_steps is omitted raises"
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                "difference_target_precision must be provided if total_opt_steps is not provided",
+            ):
+                self.bm.estimate_grbm_n_samples(
+                    0.2,
+                    0.9,
+                    delta0=3.0,
+                    data_target_precision=0.1,
+                )
+
+        with self.subTest("Invalid delta0 raises when total_opt_steps is omitted"):
+            with self.assertRaisesRegex(ValueError, "delta0 must be positive"):
+                self.bm.estimate_grbm_n_samples(
+                    0.2,
+                    0.9,
+                    delta0=0.0,
+                    data_target_precision=0.1,
+                    difference_target_precision=0.05,
+                )
+
+        with self.subTest("Invalid data_target_precision raises when total_opt_steps is omitted"):
+            with self.assertRaisesRegex(
+                ValueError, "data_target_precision must be a positive float"
+            ):
+                self.bm.estimate_grbm_n_samples(
+                    0.2,
+                    0.9,
+                    delta0=3.0,
+                    data_target_precision=0.0,
+                    difference_target_precision=0.05,
+                )
+
+        with self.subTest(
+            "Invalid difference_target_precision raises when total_opt_steps is omitted"
+        ):
+            with self.assertRaisesRegex(
+                ValueError, "difference_target_precision must be a positive float"
+            ):
+                self.bm.estimate_grbm_n_samples(
+                    0.2,
+                    0.9,
+                    delta0=3.0,
+                    data_target_precision=0.1,
+                    difference_target_precision=0.0,
+                )
+
+    def test_estimation_monotonicity_with_relaxed_requirements(self):
+        with self.subTest("Data sample estimate decreases as target precision is relaxed"):
+            strict = self.bm.estimate_data_n_samples(delta=0.1, target_precision=0.1)
+            relaxed = self.bm.estimate_data_n_samples(delta=0.1, target_precision=0.3)
+            self.assertLess(relaxed, strict)
+
+        with self.subTest("Data sample estimate decreases as required success probability drops"):
+            # estimate_data_n_samples uses delta (failure probability), so lower success
+            # probability corresponds to larger delta.
+            high_success = self.bm.estimate_data_n_samples(delta=0.01, target_precision=0.2)
+            low_success = self.bm.estimate_data_n_samples(delta=0.1, target_precision=0.2)
+            self.assertLess(low_success, high_success)
+
+        with self.subTest("GRBM sample estimate decreases as target precision is relaxed"):
+            strict = self.bm.estimate_grbm_n_samples(
+                grbm_target_precision=0.1,
+                success_probability=0.9,
+                total_opt_steps=20,
+            )
+            relaxed = self.bm.estimate_grbm_n_samples(
+                grbm_target_precision=0.2,
+                success_probability=0.9,
+                total_opt_steps=20,
+            )
+            self.assertLess(relaxed, strict)
+
+        with self.subTest("GRBM sample estimate decreases as required success probability drops"):
+            high_success = self.bm.estimate_grbm_n_samples(
+                grbm_target_precision=0.2,
+                success_probability=0.99,
+                total_opt_steps=20,
+            )
+            low_success = self.bm.estimate_grbm_n_samples(
+                grbm_target_precision=0.2,
+                success_probability=0.9,
+                total_opt_steps=20,
+            )
+            self.assertLess(low_success, high_success)
+
+        with self.subTest(
+            "Estimated optimization steps decrease when precision targets are relaxed"
+        ):
+            strict_steps = self.bm.estimate_opt_steps(
+                delta0=3.0,
+                data_target_precision=0.05,
+                grbm_target_precision=0.05,
+                difference_target_precision=0.05,
+            )
+            relaxed_steps = self.bm.estimate_opt_steps(
+                delta0=3.0,
+                data_target_precision=0.2,
+                grbm_target_precision=0.2,
+                difference_target_precision=0.2,
+            )
+            self.assertLess(relaxed_steps, strict_steps)
 
     def test_pad(self):
         grbm = GRBM([0, 1, 2], [(0, 1), (0, 2), (1, 2)], [1])
