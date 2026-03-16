@@ -82,8 +82,8 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         self._idx_to_edge = {i: e for i, e in enumerate(self._edges)}
         self._edge_to_idx = {e: i for i, e in self._idx_to_edge.items()}
 
-        self._linear = torch.nn.Parameter(torch.randn(self._n_nodes)/torch.tensor(self._n_nodes, dtype=torch.float).sqrt())
-        self._quadratic = torch.nn.Parameter(torch.randn(self._n_edges)/torch.tensor(self._n_nodes, dtype=torch.float).sqrt())
+        self._linear = torch.nn.Parameter(torch.randn(self._n_nodes)/self._n_nodes**0.5)
+        self._quadratic = torch.nn.Parameter(torch.randn(self._n_edges)/self._n_nodes**0.5)
 
         edge_idx_i = torch.tensor([self._node_to_idx[i] for i, _ in self._edges])
         edge_idx_j = torch.tensor([self._node_to_idx[j] for _, j in self._edges])
