@@ -52,7 +52,7 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
     The initialization-strategy is grounded in  
     `Hinton's practical guide for RBM training<https://www.cs.toronto.edu/~hinton/absps/guideTR.pdf>`_, which recommends sampling 
     weights from a Gaussian distribution with mean 0 and standard deviation 0.01 (for zero-one-valued RBMs). 
-    The scaling factor of 1/sqrt(N) ensures that the energy functional remains extensive 
+    The scaling factor of :math:`1/\sqrt(N)` ensures that the energy functional remains extensive 
     and initializes the graph RBM in a paramagnetic regime, consistent with the Sherrington-Kirkpatrick model 
     `<https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.35.1792>`_.
 
