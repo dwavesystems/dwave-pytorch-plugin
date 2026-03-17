@@ -54,6 +54,7 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
     weights from a Gaussian distribution with mean 0 and standard deviation 0.01 (for zero-one-valued RBMs). 
     The scaling factor of :math:`1/\sqrt(N)` ensures that the energy functional remains extensive 
     and initializes the graph RBM in a paramagnetic regime, consistent with the ` Sherrington-Kirkpatrick model<https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.35.1792>`_.
+    The biases are initialized to zero to ensure extensiveness of the energy functional and to avoid introducing any initial preference for spin configurations.
 
     Args:
         nodes (Iterable[Hashable]): List of nodes.
@@ -88,7 +89,7 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         self._idx_to_edge = {i: e for i, e in enumerate(self._edges)}
         self._edge_to_idx = {e: i for i, e in self._idx_to_edge.items()}
 
-        self._linear = torch.nn.Parameter(torch.randn(self._n_nodes)/self._n_nodes**0.5)
+        self._linear = torch.nn.Parameter(torch.zeros(self._n_nodes))
         self._quadratic = torch.nn.Parameter(torch.randn(self._n_edges)/self._n_nodes**0.5)
 
         edge_idx_i = torch.tensor([self._node_to_idx[i] for i, _ in self._edges])
