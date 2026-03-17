@@ -1,4 +1,16 @@
 ---
 features:
   - |
-    grbm weights and biases initialization set to Gaussian N(0,1/number of nodes)
+    Initialize ``GraphRestrictedBoltzmannMachine`` weights using Gaussian 
+    random variables with standard deviation equal to 1/sqrt(N), where N 
+    denotes the number of nodes in the gRBM.
+other:
+  - |
+    The initialization strategy is grounded in Hinton's practical guide for RBM training 
+    `<https://www.cs.toronto.edu/~hinton/absps/guideTR.pdf>`_, which recommends sampling 
+    weights from a Gaussian distribution with mean 0 and standard deviation 0.01. 
+    The scaling factor of 1/sqrt(N) ensures that the energy functional remains extensive 
+    and initializes the graph RBM in a paramagnetic regime, consistent with the Sherrington-Kirkpatrick model 
+    `<https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.35.1792>`_.
+
+
