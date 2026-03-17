@@ -1,0 +1,4 @@
+---
+features:
+  - |
+    grbm weights and biases initialization set to Gaussian N(0,1/number of nodes)
