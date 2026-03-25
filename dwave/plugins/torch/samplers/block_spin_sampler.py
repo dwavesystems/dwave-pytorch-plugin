@@ -94,7 +94,7 @@ class BlockSampler(TorchSampler):
         if seed is not None:
             self._rng = self._rng.manual_seed(seed)
 
-        initial_states = self._prepare_initial_states(num_chains, initial_states, self._rng)
+        initial_states = self._prepare_initial_states(num_chains, initial_states)
         self._schedule = nn.Parameter(torch.tensor(list(schedule)), requires_grad=False)
         self._x = nn.Parameter(initial_states.float(), requires_grad=False)
         self._zeros = nn.Parameter(torch.zeros((num_chains, 1)), requires_grad=False)
@@ -133,7 +133,6 @@ class BlockSampler(TorchSampler):
 
     def _prepare_initial_states(
             self, num_chains: int, initial_states: torch.Tensor | None = None,
-            generator: torch.Generator | None = None
     ) -> torch.Tensor:
         """Convert initial states to tensor or sample uniformly random spins as initial states.
 
@@ -143,7 +142,6 @@ class BlockSampler(TorchSampler):
                 (``num_chains``, ``self._grbm.n_nodes``) representing the initial states of the
                 sampler's Markov chains. If None, then initial states are sampled uniformly from
                 +/-1 values. Defaults to None.
-            generator (torch.Generator | None): A random number generator.
 
         Raises:
             ValueError: If the shape of initial states does not match that of the expected
@@ -154,7 +152,7 @@ class BlockSampler(TorchSampler):
             torch.Tensor: The initial states of the sampler's Markov chain.
         """
         if initial_states is None:
-            initial_states = randspin((num_chains, self._grbm.n_nodes), generator=generator)
+            initial_states = randspin((num_chains, self._grbm.n_nodes), generator=self._rng)
 
         if initial_states.shape != (num_chains, self._grbm.n_nodes):
             raise ValueError(
@@ -330,8 +328,8 @@ class BlockSampler(TorchSampler):
             if mask is not None:
                 self._x[:, block] = torch.where(mask[:, block], x[:, block], self._x[:, block])
 
-    def _validate_input_and_generate_mask(self, x: torch.Tensor) -> torch.Tensor:
-        """Validate conditional sampling input and construct a boolean mask.
+    def _validate_input(self, x: torch.Tensor) -> None:
+        """Validate conditional sampling input.
 
         This function checks that the provided tensor ``x`` is a valid
         partially observed state for conditional sampling. Observed variables
@@ -342,9 +340,6 @@ class BlockSampler(TorchSampler):
 
         Args:
             x (torch.Tensor): Tensor of shape (num_chains, n_nodes), with NaNs for spins to sample.
-
-        Returns:
-            torch.Tensor: Boolean mask of clamped spins.
         """   
         if x.shape != self._x.shape:
             raise ValueError(
@@ -370,8 +365,6 @@ class BlockSampler(TorchSampler):
             raise ValueError(
                 "Conditional sampling can only have unclamped spins in a single block per chain."
             )
-        
-        return mask
     
     @torch.no_grad
     def sample(self, x: torch.Tensor | None = None) -> torch.Tensor:
@@ -379,14 +372,15 @@ class BlockSampler(TorchSampler):
 
         Args:
             x (torch.Tensor): A tensor of shape (``batch_size``, ``dim``) or (``batch_size``, ``n_nodes``)
-                interpreted as a batch of partially-observed spins. Entries marked with ``torch.nan`` will
+                interpreted as a batch of partially observed spins. Entries marked with ``torch.nan`` will
                 be sampled; entries with +/-1 values will remain constant.
 
         Returns:
             torch.Tensor: A tensor of shape (batch_size, dim) of +/-1 values sampled from the model.
         """
         if x is not None:
-            mask = self._validate_input_and_generate_mask(x)
+            mask = ~torch.isnan(x)
+            self._validate_input(x)
             # Initialize state with clamped spins
             self._x.data[:] = torch.where(mask, x, self._x)
         else:

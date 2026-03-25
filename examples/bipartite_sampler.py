@@ -17,8 +17,6 @@ from torch.optim import SGD
 from dwave.plugins.torch.models.boltzmann_machine import GraphRestrictedBoltzmannMachine as GRBM
 from dwave.plugins.torch.samplers.bipartite_sampler import BipartiteGibbsSampler
 
-torch.manual_seed(123)  
-
 def run():
     # RBM
     n_visible, n_hidden = 50, 20
@@ -28,12 +26,11 @@ def run():
     edges = [[v, h] for v in visible_nodes for h in hidden_nodes]
     grbm = GRBM(nodes, edges, hidden_nodes=hidden_nodes)
 
-    num_chains = 100
+    num_chains = batch_size = 100
     sampler = BipartiteGibbsSampler(grbm, num_chains=num_chains, schedule=[1.0], seed=123)
 
 
     n_iterations = 3
-    batch_size = 100
     n_visible = len(visible_nodes)
 
     X = 1 - 2.0 * torch.randint(0, 2, (n_iterations, batch_size, n_visible))
@@ -69,4 +66,5 @@ def run():
     print("\nTraining finished.")
 
 if __name__ == "__main__":
+    torch.manual_seed(123)  
     run()

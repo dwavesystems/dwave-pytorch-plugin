@@ -73,7 +73,14 @@ class BipartiteGibbsSampler(TorchSampler):
     ):
         if grbm._connected_hidden:
             raise ValueError("BipartiteGibbsSampler requires no hidden-hidden connections.")
-
+        
+        visible_nodes = set(grbm.nodes) - set(grbm.hidden_nodes)
+        connected_visible = self._connected_hidden = any(
+            a in visible_nodes and b in visible_nodes for a, b in grbm.edges
+        )
+        if connected_visible:
+            raise ValueError("BipartiteGibbsSampler requires no visible-visible connections.")
+        
         self._grbm = grbm
         self._num_chains = num_chains
 
@@ -82,7 +89,7 @@ class BipartiteGibbsSampler(TorchSampler):
             self._rng.manual_seed(seed)
 
         initial_states = self._prepare_initial_states(
-            num_chains, initial_states, self._rng
+            num_chains, initial_states
         )
         self._schedule = nn.Parameter(torch.tensor(list(schedule)), requires_grad=False)
         self._x = nn.Parameter(initial_states.float(), requires_grad=False)
@@ -123,7 +130,6 @@ class BipartiteGibbsSampler(TorchSampler):
         self,
         num_chains: int,
         initial_states: torch.Tensor | None = None,
-        generator: torch.Generator | None = None,
     ) -> torch.Tensor:
         """Convert initial states to tensor or sample uniformly random spins as initial states.
 
@@ -133,7 +139,6 @@ class BipartiteGibbsSampler(TorchSampler):
                 (``num_chains``, ``self._grbm.n_nodes``) representing the initial states of the
                 sampler's Markov chains. If None, then initial states are sampled uniformly from
                 +/-1 values. Defaults to None.
-            generator (torch.Generator | None): A random number generator.
 
         Raises:
             ValueError: If the shape of initial states does not match that of the expected
@@ -145,7 +150,7 @@ class BipartiteGibbsSampler(TorchSampler):
         """
         if initial_states is None:
             initial_states = randspin(
-                (num_chains, self._grbm.n_nodes), generator=generator
+                (num_chains, self._grbm.n_nodes), generator=self._rng
             )
 
         if initial_states.shape != (num_chains, self._grbm.n_nodes):
@@ -251,8 +256,8 @@ class BipartiteGibbsSampler(TorchSampler):
             h = self._grbm.hidden_idx
             self._x[:, h] = torch.where(mask[:, h], x[:, h], self._x[:, h])
 
-    def _validate_input_and_generate_mask(self, x: torch.Tensor) -> torch.Tensor:
-        """Validate conditional sampling input and construct a boolean mask.
+    def _validate_input(self, x: torch.Tensor) -> None:
+        """Validate conditional sampling input.
 
         This function checks that the provided tensor ``x`` is a valid
         partially observed state for conditional sampling. Observed variables
@@ -270,7 +275,7 @@ class BipartiteGibbsSampler(TorchSampler):
         Args:
             x (torch.Tensor): A tensor of shape (``num_chains``, ``dim``)
                 or (``num_chains``, ``n_nodes``) interpreted as a batch of
-                partially-observed spins. Entries marked with ``torch.nan``
+                partially observed spins. Entries marked with ``torch.nan``
                 will be sampled; entries with +/-1 values will remain constant.
 
         Raises:
@@ -278,11 +283,6 @@ class BipartiteGibbsSampler(TorchSampler):
             ``(num_chains, n_nodes)``, contains values other than ``±1``
             or ``NaN``, or if both visible and hidden variables are
             simultaneously unclamped within the same chain.
-
-        Returns:
-            torch.Tensor: Boolean mask of shape ``(num_chains, n_nodes)`` where
-            ``True`` indicates clamped variables (observed in ``x``) and
-            ``False`` indicates variables that should be sampled (``NaN`` in x).
         """
         if x.shape != self._x.shape:
             raise ValueError(
@@ -304,8 +304,6 @@ class BipartiteGibbsSampler(TorchSampler):
                 "The input must be unclamped for visible or hidden but not both."
             )
 
-        return mask
-
     @torch.no_grad
     def sample(self, x: torch.Tensor | None = None) -> torch.Tensor:
         """Draw samples from the model using Gibbs sampling.
@@ -320,7 +318,7 @@ class BipartiteGibbsSampler(TorchSampler):
 
         Args:
             x (torch.Tensor): A tensor of shape (``num_chains``, ``dim``) or (``num_chains``, ``n_nodes``)
-                interpreted as a batch of partially-observed spins. Entries marked with ``torch.nan`` will
+                interpreted as a batch of partially observed spins. Entries marked with ``torch.nan`` will
                 be sampled; entries with +/-1 values will remain constant. For each chain, either visible
                 nodes or hidden nodes may contain ``NaN`` values, but not both.
 
@@ -328,7 +326,8 @@ class BipartiteGibbsSampler(TorchSampler):
             torch.Tensor: A tensor of shape (num_chains, n_nodes) of +/-1 values sampled from the model.
         """
         if x is not None:
-            mask = self._validate_input_and_generate_mask(x)
+            mask = ~torch.isnan(x)
+            self._validate_input(x)
 
             # Initialize state respecting clamped spins
             self._x.data[:] = torch.where(mask, x, self._x)
