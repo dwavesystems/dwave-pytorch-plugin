@@ -1,0 +1,12 @@
+---
+features:
+  - |
+    Add ``BipartiteGibbsSampler`` for performing Gibbs sampling of
+    bipartite graph-restricted Boltzmann Machines.
+  - |
+    Add conditional sampling functionality for the ``BlockSampler``.
+  - |
+    Add ``.clone()`` to the return of ``BlockSampler.sample`` to prevent
+    unintended in-place modification of the sampler's internal state due to
+    returning a reference to the underlying tensor.
+
