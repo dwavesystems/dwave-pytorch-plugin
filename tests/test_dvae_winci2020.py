@@ -81,7 +81,12 @@ class TestDiscreteVariationalAutoencoder(unittest.TestCase):
         # self.decoders is independent of number of latent dims, but we also create a dict to
         # separate them
         self.decoders = {i: Decoder(latent_features, input_features) for i in latent_dims_list}
+        # self.dvaes is a dict whose keys are the numbers of latent dims and the values are the
+        # models themselves
 
+        self.dvaes = {i: DVAE(self.encoders[i], self.decoders[i]) for i in latent_dims_list}
+
+        # Now we also create a DVAE with a trainable Encoder
         def deterministic_latent_to_discrete(logits: torch.Tensor, n_samples: int) -> torch.Tensor:
             # straight-through estimator that maps positive logits to 1 and negative logits to -1
             hard = torch.sign(logits)
@@ -89,14 +94,6 @@ class TestDiscreteVariationalAutoencoder(unittest.TestCase):
             result = hard - soft.detach() + soft
             # Now we need to repeat the result n_samples times along a new dimension
             return repeat(result, "b ... -> b n ...", n=n_samples)
-        # self.dvaes is a dict whose keys are the numbers of latent dims and the values are the
-        # models themselves
-
-        self.dvaes = {i: DVAE(
-            self.encoders[i], self.decoders[i], latent_to_discrete=deterministic_latent_to_discrete
-        ) for i in latent_dims_list}
-
-        # Now we also create a DVAE with a trainable Encoder
 
         self.dvae_with_trainable_encoder = DVAE(
             encoder=torch.nn.Linear(input_features, latent_features),
@@ -250,19 +247,22 @@ class TestDiscreteVariationalAutoencoder(unittest.TestCase):
     @parameterized.expand([(i, j) for i in range(1, 3) for j in [0, 1, 5, 1000]])
     def test_forward(self, n_latent_dims, n_samples):
         """Test the forward method."""
+        torch.manual_seed(1234)  # Set seed for reproducibility of latent_to_discrete sampling
         expected_latents = self.encoders[n_latent_dims](self.data)
         expected_discretes = self.dvaes[n_latent_dims].latent_to_discrete(
             expected_latents, n_samples
         )
         expected_reconstructed_x = self.decoders[n_latent_dims](expected_discretes)
 
+        torch.manual_seed(1234)  # Set seed again to ensure that the sampling in the forward method
+        # is the same as in the expected_discretes
         latents, discretes, reconstructed_x = self.dvaes[n_latent_dims].forward(
             x=self.data, n_samples=n_samples
         )
+        torch.testing.assert_close(latents, expected_latents)
+        torch.testing.assert_close(discretes, expected_discretes)
+        torch.testing.assert_close(reconstructed_x, expected_reconstructed_x)
 
-        assert torch.equal(reconstructed_x, expected_reconstructed_x)
-        assert torch.equal(discretes, expected_discretes)
-        assert torch.equal(latents, expected_latents)
 
 
 if __name__ == "__main__":
