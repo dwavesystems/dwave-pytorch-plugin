@@ -78,16 +78,10 @@ class TestDiscreteVariationalAutoencoder(unittest.TestCase):
         # are the models themselves
         latent_dims_list = [1, 2]
         self.encoders = {i: Encoder(i) for i in latent_dims_list}
-        # self.decoders is independent of number of latent dims, but we also create a dict to separate
-        # them
+        # self.decoders is independent of number of latent dims, but we also create a dict to
+        # separate them
         self.decoders = {i: Decoder(latent_features, input_features) for i in latent_dims_list}
 
-        # self.dvaes is a dict whose keys are the numbers of latent dims and the values are the models
-        # themselves
-
-        self.dvaes = {i: DVAE(self.encoders[i], self.decoders[i]) for i in latent_dims_list}
-
-        # Now we also create a DVAE with a trainable Encoder
         def deterministic_latent_to_discrete(logits: torch.Tensor, n_samples: int) -> torch.Tensor:
             # straight-through estimator that maps positive logits to 1 and negative logits to -1
             hard = torch.sign(logits)
@@ -95,6 +89,14 @@ class TestDiscreteVariationalAutoencoder(unittest.TestCase):
             result = hard - soft.detach() + soft
             # Now we need to repeat the result n_samples times along a new dimension
             return repeat(result, "b ... -> b n ...", n=n_samples)
+        # self.dvaes is a dict whose keys are the numbers of latent dims and the values are the
+        # models themselves
+
+        self.dvaes = {i: DVAE(
+            self.encoders[i], self.decoders[i], latent_to_discrete=deterministic_latent_to_discrete
+        ) for i in latent_dims_list}
+
+        # Now we also create a DVAE with a trainable Encoder
 
         self.dvae_with_trainable_encoder = DVAE(
             encoder=torch.nn.Linear(input_features, latent_features),
