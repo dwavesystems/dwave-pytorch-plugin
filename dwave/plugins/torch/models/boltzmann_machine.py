@@ -373,12 +373,12 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
                 (b1, N) where b1 denotes the batch size and N denotes the number of
                 variables in the model.
             s_model (torch.Tensor): Tensor of spins drawn from the model with shape
-                (b2, N) where b2 denotes the batch size and N denotse the number of
+                (b2, N) where b2 denotes the batch size and N denotes the number of
                 variables in the model.
             kind (Literal["sampling", "exact-disc"]): Method for computing, or approximating,
                 marginal expectations given partial observations.
                 The "sampling" method samples, conditionally, for each observation.
-                The "exact-disc" method computes exact margnials for when hidden units are
+                The "exact-disc" method computes exact marginals for when hidden units are
                 disconnected, i.e., no connections between hidden units.
             prefactor (float, optional): A scaling applied to the Hamiltonian weights (linear and
                 quadratic weights). When None, no scaling is applied. Defaults to None.

@@ -109,7 +109,7 @@ def run(use_qpu: bool, num_reads: int, batch_size: int, n_iterations: int, fully
             prefactor=prefactor, linear_range=h_range, quadratic_range=j_range
         )
 
-        # Backpropgate gradients
+        # Backpropagate gradients
         quasi.backward()
 
         # Update model weights with a step of stochastic gradient descent
