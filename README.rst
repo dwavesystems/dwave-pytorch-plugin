@@ -32,7 +32,7 @@ Each Markov chain samples at a constant unit inverse temperature.
 
 .. code-block:: python
 
-    sampler = BlockSampler(grbm=grbm, crayon=lambda v: v in {"b", "d"}, num_chains=3, schedule=[1]*10)
+    sampler = BlockSampler(grbm=grbm, colouring=lambda v: v in {"b", "d"}, num_chains=3, schedule=[1]*10)
 
 
 Create a batch of data and perform one likelihood-optimization step
