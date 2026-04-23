@@ -21,6 +21,7 @@ from parameterized import parameterized
 from dwave.plugins.torch.models.boltzmann_machine import GraphRestrictedBoltzmannMachine as GRBM
 from dwave.system.temperatures import maximum_pseudolikelihood_temperature as mple
 
+from dwave.plugins.torch.models.boltzmann_machine import RestrictedBoltzmannMachine as RBM
 
 class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
     def setUp(self) -> None:
@@ -407,6 +408,164 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         # the sufficient statistics of the average spins.
         torch.testing.assert_close(grad, grad_auto)
 
+class TestRBM(unittest.TestCase):
 
+    def setUp(self):
+        # Small RBM for testing
+        self.rbm = RBM(n_visible=4, n_hidden=3)
+
+        # Common input data for CD tests
+        self.batch = torch.tensor([[1.0, 0.0, 1.0, 1.0], [0.0, 1.0, 0.0, 1.0]])
+
+        # Shared CD kwargs
+        self.cd_kwargs = dict(
+            epoch=0,
+            n_gibbs_steps=1,
+            learning_rate=0.1,
+            momentum_coefficient=0.5,
+            weight_decay=0.0,
+            n_epochs=10,
+        )
+
+    def test_sample_hidden_shape(self):
+        visible = torch.randint(0, 2, (5, self.rbm.n_visible)).float()
+        hidden = self.rbm.sample_hidden(visible)
+        # Ensure shape is correct
+        self.assertEqual(hidden.shape, (5, self.rbm.n_hidden))
+
+    def test_sample_hidden_binary(self):
+        visible = torch.randint(0, 2, (5, self.rbm.n_visible)).float()
+        hidden = self.rbm.sample_hidden(visible)
+
+        # Ensure output is binary
+        self.assertTrue(torch.all((hidden == 0) | (hidden == 1)))
+
+    @parameterized.expand(
+        [
+            ("all_ones", 1000.0, 1),
+            ("all_zeroes", -1000.0, 0),
+        ]
+    )
+    def test_sample_hidden_saturation(self, name, bias_value, expected_value):
+        """
+        Test that sample_hidden saturates correctly when the hidden biases
+        are set to very large positive or negative values.
+
+        If hidden_bias[j] → +∞
+            sigmoid(hidden_bias + visible @ weights) → 1
+            bernoulli(1) → always 1
+
+        If hidden_bias[j] → -∞
+            sigmoid(hidden_bias + visible @ weights) → 0
+            bernoulli(0) → always 0
+        """
+
+        # Set all hidden biases to an extreme constant
+        with torch.no_grad():
+            self.rbm._hidden_biases.fill_(bias_value)
+
+        # The visible input does not matter in saturation conditions
+        visible = torch.zeros(5, self.rbm.n_visible)
+
+        # Sample hidden units
+        hidden = self.rbm.sample_hidden(visible)
+
+        # Assert that all hidden units match the expected saturated value
+        self.assertTrue(torch.all(hidden == expected_value))
+
+    def test_sample_visible_shape(self):
+        hidden = torch.randint(0, 2, (5, self.rbm.n_hidden)).float()
+        visible = self.rbm.sample_visible(hidden)
+
+        # Ensure shape is correct
+        self.assertEqual(visible.shape, (5, self.rbm.n_visible))
+
+    def test_sample_visible_binary(self):
+        hidden = torch.randint(0, 2, (5, self.rbm.n_hidden)).float()
+        visible = self.rbm.sample_visible(hidden)
+
+        # Ensure output is binary
+        self.assertTrue(torch.all((visible == 0) | (visible == 1)).item())
+
+    @parameterized.expand(
+        [
+            ("all_ones", 1000.0, 1),
+            ("all_zeroes", -1000.0, 0),
+        ]
+    )
+    def test_sample_visible_saturation(self, name, bias_value, expected_value):
+        """
+        Test that sample_visible saturates correctly when the visible biases
+        are set to very large positive or negative values.
+
+        If visible_bias → +∞: sigmoid → 1 → bernoulli(1) → always 1
+        If visible_bias → -∞: sigmoid → 0 → bernoulli(0) → always 0
+        """
+
+        # Large positive/negative bias makes sigmoid output deterministic
+        with torch.no_grad():
+            self.rbm._visible_biases.fill_(bias_value)
+
+        # Hidden input doesn't matter when biases dominate
+        hidden = torch.zeros(5, self.rbm.n_hidden)
+
+        visible = self.rbm.sample_visible(hidden)
+
+        self.assertTrue(torch.all(visible == expected_value).item())
+
+    def test_forward_scalar_output(self):
+        """Forward should return a scalar tensor."""
+        batch = torch.randn(5, self.rbm.n_visible)
+        out = self.rbm.forward(batch)
+        self.assertIsInstance(out, torch.Tensor)
+        self.assertEqual(out.ndim, 0)
+
+    def test_forward_zero_weights_biases(self):
+        """
+        Check free energy when all weights and biases are zero.
+        Analytic test: all weights & biases = 0
+            Free energy becomes:
+            F(v) = - sum_j softplus(0) = -n_hidden * log(2)
+        """
+        with torch.no_grad():
+            self.rbm._weights[:] = 0
+            self.rbm._visible_biases[:] = 0
+            self.rbm._hidden_biases[:] = 0
+        v = torch.tensor([[1.0, 0.0, 1.0, 1.0]])  # value doesn't matter
+        out = self.rbm.forward(v)
+        expected = -self.rbm.n_hidden * torch.log(torch.tensor(2.0))
+        self.assertTrue(torch.allclose(out, expected))
+
+    def test_forward_ordering_bias(self):
+        """
+        Free energy ordering test:
+            If visible_bias is very positive, visible=1 must yield
+            much lower free energy than visible=0.
+        """
+        # Create a tiny RBM for easy testing
+        rbm = RBM(n_visible=1, n_hidden=1)
+        with torch.no_grad():
+            rbm._weights[:] = 0
+            rbm._hidden_biases[:] = 0
+            rbm._visible_biases[:] = 1000.0
+
+        f1 = rbm.forward(torch.tensor([[1.0]]))
+        f0 = rbm.forward(torch.tensor([[0.0]]))
+        self.assertLess(f1, f0)
+
+    def test_forward_small_numeric_case(self):
+        """Check free energy against manual calculation for 1 visible and 1 hidden unit."""
+        rbm = RBM(n_visible=1, n_hidden=1)
+        with torch.no_grad():
+            rbm._weights[:] = 2.0
+            rbm._visible_biases[:] = 1.0
+            rbm._hidden_biases[:] = -1.0
+
+        v = torch.tensor([[1.0]])
+        # Independent manual calculation
+        expected = -1.0 - torch.nn.functional.softplus(torch.tensor(1.0))
+        out = rbm.forward(v)
+        self.assertTrue(torch.allclose(out, expected))
+    
 if __name__ == "__main__":
     unittest.main()
