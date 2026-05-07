@@ -6,6 +6,7 @@ torch==2.9.1
 dimod==0.12.21
 dwave-system==1.34.0
 dwave-hybrid==0.6.14
+einops==0.8.1
 
 # Development requirements
 reno==4.1.0
