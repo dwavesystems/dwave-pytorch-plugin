@@ -1,0 +1,3 @@
+---
+features:
+  - Add a static affine module. It is static in the sense that there are no trainable parameters.

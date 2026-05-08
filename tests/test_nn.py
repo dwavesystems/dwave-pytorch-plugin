@@ -16,7 +16,7 @@ import unittest
 import torch
 from parameterized import parameterized
 
-from dwave.plugins.torch.nn import LinearBlock, SkipLinear, store_config
+from dwave.plugins.torch.nn import Affine, LinearBlock, SkipLinear, store_config
 from tests.helper_functions import model_probably_good
 
 
@@ -77,6 +77,49 @@ class TestUtils(unittest.TestCase):
                              dict(a=123, b=1, x=5, y="hello", module_name="InnerModel"))
         self.assertDictEqual(dict(model.config["module_2"]),
                              dict(a="second", b=1, x=4, y="lol", module_name="InnerModel"))
+
+
+class TestAffine(unittest.TestCase):
+    """Verify the Affine module correctly applies y = scale * x + shift
+    and integrates properly with PyTorch's module system (state_dict, device)."""
+
+    def test_forward(self):
+        # Basic correctness: 2*x + 3
+        affine = Affine(scale=2.0, shift=3.0)
+        x = torch.tensor([1.0, -1.0, 0.0])
+        result = affine(x)
+        torch.testing.assert_close(result, torch.tensor([5.0, 1.0, 3.0]))
+
+    def test_forward_batched(self):
+        # Ensure broadcasting works over batch dimensions
+        affine = Affine(scale=0.5, shift=-1.0)
+        x = torch.tensor([[2.0, 4.0], [0.0, -2.0]])
+        result = affine(x)
+        torch.testing.assert_close(result, torch.tensor([[0.0, 1.0], [-1.0, -2.0]]))
+
+    def test_identity(self):
+        # scale=1, shift=0 should be a no-op
+        affine = Affine(scale=1.0, shift=0.0)
+        x = torch.tensor([1.2, 4.3, 5.0, 3.1415926535, -324234.93])
+        torch.testing.assert_close(affine(x), x)
+
+    def test_zero_scale(self):
+        # scale=0 should collapse all inputs to the shift value
+        x = torch.tensor([100.0, -100.0])
+        with self.subTest("Zero-scale affine with offset should return offset"):
+            torch.testing.assert_close(Affine(scale=0.0, shift=5.0)(x), torch.tensor([5.0, 5.0]))
+        with self.subTest("Zero-scale affine with zero-offset should return 0"):
+            torch.testing.assert_close(Affine(scale=0.0, shift=0.0)(x), torch.tensor([0.0, 0.0]))
+
+    def test_state_dict(self):
+        # scale and shift are registered buffers, so they must appear in state_dict
+        # (critical for checkpointing and .to(device) to propagate correctly)
+        affine = Affine(scale=2.0, shift=3.0)
+        sd = affine.state_dict()
+        self.assertIn("scale", sd)
+        self.assertIn("shift", sd)
+        torch.testing.assert_close(sd["scale"], torch.tensor(2.0))
+        torch.testing.assert_close(sd["shift"], torch.tensor(3.0))
 
 
 class TestLinear(unittest.TestCase):
