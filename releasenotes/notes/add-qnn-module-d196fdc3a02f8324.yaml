@@ -1,0 +1,7 @@
+---
+features:
+  - |
+    Add an Ising layer for performing quantum annealing-based neural network computations.
+    Its backpropagation is computed, or approximated, using sample covariance.
+  - Add statistic base class for untrainable statistics, e.g., sufficient statistics of Ising models.
+  - Add a static affine module. It is static in the sense that there are no trainable parameters.

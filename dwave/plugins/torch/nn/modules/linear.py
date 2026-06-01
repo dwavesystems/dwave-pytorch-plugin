@@ -17,7 +17,33 @@ from torch import nn
 
 from dwave.plugins.torch.nn.modules.utils import store_config
 
-__all__ = ["SkipLinear", "LinearBlock"]
+__all__ = ["Affine", "SkipLinear", "LinearBlock"]
+
+
+class Affine(nn.Module):
+    """An affine transformation with no trainable parameters: ``y = scale * x + shift``.
+
+    Args:
+        scale: Multiplicative factor.
+        shift: Additive offset.
+    """
+
+    @store_config
+    def __init__(self, scale: float, shift: float) -> None:
+        super().__init__()
+        self.register_buffer("scale", torch.tensor(scale))
+        self.register_buffer("shift", torch.tensor(shift))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Computes ``self.scale * x + self.shift``.
+
+        Args:
+            x: Input tensor.
+
+        Returns:
+            Affine transformation of input.
+        """
+        return self.scale * x + self.shift
 
 
 class SkipLinear(nn.Module):
