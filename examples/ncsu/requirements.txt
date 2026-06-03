@@ -1,0 +1,7 @@
+numpy
+torchvision
+dwave-ocean-sdk
+dwave-pytorch-plugin
+scipy
+tqdm
+matplotlib
