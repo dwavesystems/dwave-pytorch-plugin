@@ -141,7 +141,8 @@ class TestDimodSampler(unittest.TestCase):
             samples = sampler.sample(x)
 
             # Shape check
-            self.assertTupleEqual(samples.shape, x.shape)
+            self.assertTupleEqual(samples.shape, (2, 1, 4))
+            samples = samples.squeeze()
             
             # Check clamped values unchanged
             mask = ~torch.isnan(x)
@@ -152,23 +153,83 @@ class TestDimodSampler(unittest.TestCase):
             free_values = samples[free_mask]
             self.assertTrue(torch.all(torch.isin(free_values, torch.tensor([-1.0, 1.0]))),
                             "Free variables should be sampled as ±1")
-            
-        with self.subTest("Conditional sampling with all variables clamped returns input unchanged."):
+        with self.subTest("Conditional sampling supports multiple reads."):
+            num_reads = 5
             sampler = DimodSampler(
                 self.bm,
                 SimulatedAnnealingSampler(),
                 prefactor=1,
-                sample_kwargs=dict(num_reads=1)
+                sample_kwargs=dict(num_reads=num_reads)
+            )
+
+            x = torch.tensor([
+                [1.0, float("nan"), -1.0, float("nan")],
+                [float("nan"), -1.0, float("nan"), 1.0],
+            ])
+
+            samples = sampler.sample(x)
+
+            # Shape should be (batch_size, num_reads, n_nodes)
+            self.assertTupleEqual(samples.shape, (2, 5, 4))
+            
+            # Check clamped values for every read
+            mask = ~torch.isnan(x)
+            free_mask = torch.isnan(x)
+            for i in range(num_reads):
+                self.assertTrue(torch.all(samples[:, i, :][mask] == x[mask]))
+                
+                free_values = samples[:, i, :][free_mask]
+                self.assertTrue(torch.all(torch.isin(free_values, torch.tensor([-1.0, 1.0]))),
+                                f"Free variables should be sampled as ±1 in read {i}") 
+        with self.subTest("Conditional sampling with all variables clamped returns input unchanged."):
+            num_reads = 5
+            sampler = DimodSampler(
+                self.bm,
+                SimulatedAnnealingSampler(),
+                prefactor=1,
+                sample_kwargs=dict(num_reads=num_reads)
             )
 
             x = torch.tensor([
                 [+1.0, -1.0, -1.0, +1.0],
                 [-1.0, +1.0, -1.0, -1.0],
             ])
+            
+            samples = sampler.sample(x)
+            for i in range(num_reads):
+                torch.testing.assert_close(
+                    samples[:, i, :],
+                    x,
+                    msg=f"Fully clamped inputs should be preserved in read {i}"
+                ) 
+        with self.subTest("Conditional sampling supports mixed fully-clamped and partially-clamped rows."):
+            num_reads = 5
+            sampler = DimodSampler(
+                self.bm,
+                SimulatedAnnealingSampler(),
+                prefactor=1,
+                sample_kwargs=dict(num_reads=num_reads)
+            )
+
+            x = torch.tensor([
+                [ 1.0, -1.0, -1.0,  1.0],          # fully clamped
+                [-1.0, float("nan"), 1.0, -1.0],  # partially clamped
+            ])
 
             samples = sampler.sample(x)
-            # All spins clamped, should return identical tensor
-            torch.testing.assert_close(samples, x)    
+
+            # First row fully clamped, should be preserved
+            for i in range(num_reads):
+                torch.testing.assert_close(
+                    samples[0, i, :],
+                    x[0],
+                    msg=f"Fully clamped row should be preserved in read {i}"
+                )
+                
+            # Clamped values in the second row should be preserved
+            self.assertTrue(torch.all(samples[1, :, 0] == -1))
+            self.assertTrue(torch.all(samples[1, :, 2] == 1))
+            self.assertTrue(torch.all(samples[1, :, 3] == -1))       
 
     def test_sample_set(self):
         grbm = GRBM(list("abcd"), [("a", "b")])

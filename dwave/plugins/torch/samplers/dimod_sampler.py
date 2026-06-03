@@ -86,10 +86,8 @@ class DimodSampler(TorchSampler):
     def sample(self, x: torch.Tensor | None = None) -> torch.Tensor:
         """Sample from the dimod sampler and return the corresponding tensor.
 
-        The sample set returned from the latest sample call is stored in :func:`DimodSampler.sample_set`
-        which is overwritten by subsequent calls. When ``x`` is provided (conditional sampling), the method
-        expects the underlying sampler to return a SampleSet containing exactly one sample per row of ``x``; 
-        otherwise, a ValueError is raised.
+        The sample set returned from the latest sample call is available via :attr:`DimodSampler.sample_set`
+        which is overwritten by subsequent calls.
 
         Args:
             x (torch.Tensor): A tensor of shape (``batch_size``, ``dim``) or (``batch_size``, ``n_nodes``)
@@ -100,8 +98,14 @@ class DimodSampler(TorchSampler):
                 sampler returns more than one sample per input row.
             
         Returns:
-            torch.Tensor: A tensor of shape (``batch_size``, ``n_nodes``) containing
-            sampled spin configurations with values in ``{-1, +1}``.
+            torch.Tensor: 
+            - If ``x is None``:
+                tensor of shape ``(num_reads, n_nodes)``.
+
+            - If ``x`` is provided:
+                tensor of shape ``(batch_size, num_reads, n_nodes)``.
+
+            Returned values are sampled spin configurations with entries in ``{-1, +1}``.
         """
         device = self._grbm._linear.device
         nodes = self._grbm.nodes
@@ -140,9 +144,11 @@ class DimodSampler(TorchSampler):
 
             # Handle fully clamped case
             if bqm.num_variables == 0:
-                full = torch.tensor([conditioned[node] for node in nodes],
-                                    device=device, dtype=torch.float)
-                results.append(full)
+                num_reads = self._sampler_params.get("num_reads", 1)
+                full_read = torch.empty((num_reads, n_nodes), device=device)
+                for node, idx in self._grbm._node_to_idx.items():
+                    full_read[:, idx] = conditioned[node]
+                results.append(full_read)
                 continue
             
             # Clip linear biases for remaining free variables
@@ -167,21 +173,23 @@ class DimodSampler(TorchSampler):
             sample_kwargs = dict(self._sampler_params)
             
             # Storing the latest samples                        
-            self._sample_set = self._sampler.sample(bqm, **sample_kwargs)
-                        
-            if len(self._sample_set) > 1:
-                raise ValueError(f"Expected exactly one sample per input row, but got {len(self._sample_set)}")
+            self._sample_set = AggregatedSamples.spread(self._sampler.sample(bqm, **sample_kwargs))
+            
+            sample_array = self._sample_set.record.sample
 
-            # Extract sampled values
-            sample = self._sample_set.first.sample
+            num_reads = sample_array.shape[0]
 
-            # Reconstruct full sample
-            full = torch.empty(n_nodes, device=device)
+            
+            full_read = torch.empty((num_reads, n_nodes), device=device)
+            var_to_idx = {v: i for i, v in enumerate(self._sample_set.variables)}
+
             for node, idx in self._grbm._node_to_idx.items():
-                full[idx] = conditioned[node] if node in conditioned else float(sample[node])
-            results.append(full)
-
-        # Stack to get (batch_size, n_nodes)
+                if node in conditioned:
+                    full_read[:, idx] = conditioned[node]
+                else:
+                    full_read[:, idx] = torch.from_numpy(sample_array[:, var_to_idx[node]]).to(device=device, dtype=torch.float)
+            results.append(full_read)
+        # Stack to get (batch_size, num_reads, n_nodes)
         samples = torch.stack(results, dim=0)
         return samples
     
