@@ -57,7 +57,6 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         self.assertListEqual(
             [self.bm._idx_to_node[i] for i in range(self.bm._n_nodes)], self.bm._nodes
         )
-        self.assertRaises(NotImplementedError, GRBM, [0, 1, 2], [[0, 1]], [0, 1])
         # Create a triangle graph with an additional dangling vertex
         #       a
         #     / | \
@@ -280,13 +279,13 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         prefactor = 999
 
         fake_samples = ([[-1], [1]], ["c"])
-        expectation = grbm._approximate_expectation_sampling(
-            obs, sampler, prefactor, sample_kwargs=dict(initial_states=fake_samples)).tolist()
+        expectation = grbm._conditional_hidden_sampling(
+            obs, sampler, prefactor, sample_kwargs=dict(initial_states=fake_samples)).mean(1).tolist()
         self.assertListEqual(expectation, [[-1, 0.0, 1], [-1, 0.0, -1]])
 
         fake_samples = ([[1], [1]], ["c"])
-        expectation = grbm._approximate_expectation_sampling(
-            obs, sampler, prefactor, sample_kwargs=dict(initial_states=fake_samples)).tolist()
+        expectation = grbm._conditional_hidden_sampling(
+            obs, sampler, prefactor, sample_kwargs=dict(initial_states=fake_samples)).mean(1).tolist()
         self.assertListEqual(expectation, [[-1, 1, 1.0], [-1, 1, -1.0]])
 
     def test_sampleset_to_tensor(self):
@@ -405,6 +404,60 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         # NOTE: this test relied on the hidden units being disconnected. This assumption gives rise
         # to linearity in expectation of sufficient statistics, i.e., average spin, then calculating
         # the sufficient statistics of the average spins.
+        torch.testing.assert_close(grad, grad_auto)
+
+    def test_quasi_objective_gradient_connected_hidden_units(self):
+        grbm = GRBM([1, 2, 3],
+                    [(1, 2), (1, 3), (2, 3)],
+                    [1, 2],
+                    {1: 0.2, 2: 0.2, 3: 0.3},
+                    {(1, 2): 0.2, (1, 3): 0.3, (2, 3): 0.6})
+        # Note : In the digram bellow linear biases are shown using  <>
+        #        quadratic biases using ()
+        #                 (0.2)
+        # Model:  v1 <0.2> ----- v2  <0.2>
+        #           \           /
+        #     (0.3)  \         / (0.6)
+        #             \       /
+        #                v3 <0.3>
+        s_observed = torch.tensor([[1.0]])
+        s_model = torch.tensor([[1.0, -1.0, 1.0]])
+
+        class FixedConditionalSampler:
+            def sample(self, bqm, **kwargs):
+                # Hidden samples conditioned on v3=1.
+                hidden_samples = [[-1, -1], [-1, 1], [1, -1]]
+                return SampleSet.from_samples(
+                    (hidden_samples, list(bqm.variables)),
+                    vartype=SPIN,
+                    energy=[0.0] * len(hidden_samples),
+                )
+
+        sampler = FixedConditionalSampler()
+        quasi = grbm.quasi_objective(
+            s_observed,
+            s_model,
+            kind="sampling",
+            prefactor=1.0,
+            sampler=sampler,
+            sample_kwargs={},
+        )
+        quasi.backward()
+
+        # Manual gradient: E[t(v, h) given v3=1] - t_model where
+        # t = (v1, v2, v3, v1v2, v1v3, v2v3).
+        t_cond_samples = torch.tensor(
+            [
+                [-1.0, -1.0, 1.0, 1.0, -1.0, -1.0],
+                [-1.0, 1.0, 1.0, -1.0, -1.0, 1.0],
+                [1.0, -1.0, 1.0, -1.0, 1.0, -1.0],
+            ]
+        )
+        t_cond = t_cond_samples.mean(0)
+        t_model = torch.tensor([1.0, -1.0, 1.0, -1.0, 1.0, -1.0])
+        grad = t_cond - t_model
+
+        grad_auto = torch.cat([grbm.linear.grad, grbm.quadratic.grad])
         torch.testing.assert_close(grad, grad_auto)
 
 

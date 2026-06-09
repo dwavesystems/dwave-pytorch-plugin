@@ -1,0 +1,5 @@
+---
+features:
+  - |
+    Allow hidden units to be connected during `dwave.plugins.torch.models.boltzmann_machine.GraphRestrictedBoltzmannMachine`
+    construction.
