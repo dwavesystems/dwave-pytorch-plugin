@@ -1,0 +1,5 @@
+---
+upgrade:
+  - |
+    Add conditional sampling functionality for the ``DimodSampler``. The sampler  
+    enforces one sample per input row during conditional sampling.
