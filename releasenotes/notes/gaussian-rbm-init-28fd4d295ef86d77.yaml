@@ -1,5 +1,5 @@
 ---
-features:
+upgrade:
   - |
     Initialize ``GraphRestrictedBoltzmannMachine`` weights using Gaussian 
     random variables with standard deviation equal to :math:`1/\sqrt(N)`, where :math:`N`
