@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, Optional
 import torch
 import dimod
 import warnings
-from hybrid.composers import AggregatedSamples 
+from hybrid.composers import AggregatedSamples
 
 from dwave.plugins.torch.models.boltzmann_machine import GraphRestrictedBoltzmannMachine
 from dwave.plugins.torch.samplers.base import TorchSampler
@@ -27,7 +27,9 @@ from dwave.plugins.torch.utils import sampleset_to_tensor
 if TYPE_CHECKING:
     import dimod
     from dimod import SampleSet
-    from dwave.plugins.torch.models.boltzmann_machine import GraphRestrictedBoltzmannMachine
+    from dwave.plugins.torch.models.boltzmann_machine import (
+        GraphRestrictedBoltzmannMachine,
+    )
 
 
 __all__ = ["DimodSampler"]
@@ -58,13 +60,13 @@ class DimodSampler(TorchSampler):
     """
 
     def __init__(
-            self,
-            grbm: GraphRestrictedBoltzmannMachine,
-            sampler: dimod.Sampler,
-            prefactor: float,
-            linear_range: tuple[float, float] | None = None,
-            quadratic_range: tuple[float, float] | None = None,
-            sample_kwargs: dict[str, Any] | None = None
+        self,
+        grbm: GraphRestrictedBoltzmannMachine,
+        sampler: dimod.Sampler,
+        prefactor: float,
+        linear_range: tuple[float, float] | None = None,
+        quadratic_range: tuple[float, float] | None = None,
+        sample_kwargs: dict[str, Any] | None = None,
     ) -> None:
         self._grbm = grbm
 
@@ -94,25 +96,19 @@ class DimodSampler(TorchSampler):
                 interpreted as a batch of partially-observed spins. Entries marked with ``torch.nan`` will
                 be sampled; entries with +/-1 values will remain constant.
         Raises:
-            ValueError: If ``x`` has an invalid shape or contains values other than ±1 or NaN or if the 
+            ValueError: If ``x`` has an invalid shape or contains values other than ±1 or NaN or if the
                 sampler returns more than one sample per input row.
-            
+
         Returns:
-            torch.Tensor: 
-            - If ``x is None``:
-                tensor of shape ``(num_reads, n_nodes)``.
-
-            - If ``x`` is provided:
-                tensor of shape ``(batch_size, num_reads, n_nodes)``.
-
-            Returned values are sampled spin configurations with entries in ``{-1, +1}``.
+            torch.Tensor: Sampled spin configurations with entries in ``{-1, +1}``.
+            If ``x is None`` the returned tensor has shape ``(num_reads, n_nodes)``.
+            Otherwise, the returned tensor has shape ``(batch_size, num_reads, n_nodes)``.
         """
-        device = self._grbm._linear.device
-        nodes = self._grbm.nodes
+        device = self._grbm.linear.device
         n_nodes = self._grbm.n_nodes
 
         h, J = self._grbm.to_ising(self._prefactor, self._linear_range, self._quadratic_range)
-        
+
         # Unconditional sampling
         if x is None:
             self._sample_set = AggregatedSamples.spread(
@@ -125,19 +121,19 @@ class DimodSampler(TorchSampler):
             raise ValueError(f"x must have shape (batch_size, {n_nodes})")
 
         mask = ~torch.isnan(x)
-        if not torch.all(torch.isin(x[mask], torch.tensor([-1, 1], device=x.device))):
+        if not torch.all(torch.isin(x[mask], torch.tensor([-1, 1], device=device))):
             raise ValueError("x must contain only ±1 or NaN")
 
         results = []
         for row, row_mask in zip(x, mask):
             # Fresh BQM
             bqm = dimod.BinaryQuadraticModel.from_ising(h, J)
-            
+
             # Build conditioning dict
-            conditioned = {node: int(val.item())
-                for node, val, m in zip(nodes, row, row_mask) if m
+            conditioned = {
+                node: int(val.item()) for node, val, m in zip(self._grbm.nodes, row, row_mask) if m
             }
-            
+
             # Apply conditioning
             if conditioned:
                 bqm.fix_variables(conditioned)
@@ -146,18 +142,18 @@ class DimodSampler(TorchSampler):
             if bqm.num_variables == 0:
                 num_reads = self._sampler_params.get("num_reads", 1)
                 full_read = torch.empty((num_reads, n_nodes), device=device)
-                for node, idx in self._grbm._node_to_idx.items():
+                for node, idx in self._grbm.node_to_idx.items():
                     full_read[:, idx] = conditioned[node]
                 results.append(full_read)
                 continue
-            
+
             # Clip linear biases for remaining free variables
             if self._linear_range is not None:
                 lb, ub = self._linear_range
-                for v in bqm.linear:
-                    if bqm.linear[v] > ub:
+                for v, bias in bqm.iter_linear():
+                    if bias > ub:
                         bqm.set_linear(v, ub)
-                    elif bqm.linear[v] < lb:
+                    elif bias < lb:
                         bqm.set_linear(v, lb)
 
             # Clip quadratic biases
@@ -169,32 +165,34 @@ class DimodSampler(TorchSampler):
                     elif bias < lb:
                         bqm.set_quadratic(u, v, lb)
 
-            # Sample one configuration per input
-            sample_kwargs = dict(self._sampler_params)
-            
-            # Storing the latest samples                        
-            self._sample_set = AggregatedSamples.spread(self._sampler.sample(bqm, **sample_kwargs))
-            
+            # Storing the latest samples
+            self._sample_set = AggregatedSamples.spread(
+                self._sampler.sample(bqm, **self._sampler_params)
+            )
             sample_array = self._sample_set.record.sample
 
             num_reads = sample_array.shape[0]
 
-            
             full_read = torch.empty((num_reads, n_nodes), device=device)
             var_to_idx = {v: i for i, v in enumerate(self._sample_set.variables)}
 
-            for node, idx in self._grbm._node_to_idx.items():
+            for node, idx in self._grbm.node_to_idx.items():
                 if node in conditioned:
                     full_read[:, idx] = conditioned[node]
                 else:
-                    full_read[:, idx] = torch.from_numpy(sample_array[:, var_to_idx[node]]).to(device=device, dtype=torch.float)
+                    full_read[:, idx] = torch.from_numpy(sample_array[:, var_to_idx[node]]).to(
+                        device=device, dtype=torch.float
+                    )
             results.append(full_read)
+
+        reference_shape = results[0].shape
+        if not all(result.shape == reference_shape for result in results):
+            raise ValueError(f"Expected all samples to have shape {reference_shape}")
         # Stack to get (batch_size, num_reads, n_nodes)
         samples = torch.stack(results, dim=0)
         return samples
-    
-    def _sampleset_to_tensor(self, sample_set: SampleSet, device: Optional[torch.device] = None
-    ) -> torch.Tensor:
+
+    def _sampleset_to_tensor(self, sample_set: SampleSet, device: Optional[torch.device] = None) -> torch.Tensor:
         """Converts a ``dimod.SampleSet`` to a ``torch.Tensor`` using GRBM node order.
 
         Args:
