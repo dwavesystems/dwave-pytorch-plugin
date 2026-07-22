@@ -1,0 +1,5 @@
+---
+fixes:
+  - |
+    GraphRestrictedBoltzmannMachines should not be allowed to be defined with self-loops.
+    Presence of self-loops is now checked at construction time.

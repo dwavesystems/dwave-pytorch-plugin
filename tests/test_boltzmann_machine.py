@@ -70,6 +70,17 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         self.assertAlmostEqual(bm.linear[2].item(), w1, 2)
         self.assertAlmostEqual(bm.quadratic[3].item(), w2, 2)
 
+    def test_selfloop(self):
+        # Create a triangle graph with an additional dangling vertex
+        #       a-SELF-LOOP
+        #       | \
+        #    b--c  d
+        # Note the node order is deliberately "dbac" in order to test variable orderings
+        self.nodes = list("dbac")
+        self.edges = [["a", "a"], ["a", "c"], ["a", "d"], ["b", "c"]]
+        with self.assertRaisesRegex(ValueError, "Self-loops are not allowed"):
+            GRBM(self.nodes, self.edges, None, {"a": 0}, {("b", "c"): 0})
+
     def test_quadratic(self):
         self.bm.set_quadratic({("d", "b"): 999})
         self.assertEqual(999, self.bm.quadratic[0])
