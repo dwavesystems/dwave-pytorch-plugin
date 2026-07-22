@@ -85,7 +85,7 @@ class TestGaussianKernel(unittest.TestCase):
         y = torch.tensor([[0.0, 1.0],
                           [-3.0, 5.0],
                           [1.2, 9.0]], requires_grad=True)
-        dist = torch.cdist(x, y)
+        dist = torch.cdist(x, y)**2
 
         with self.subTest("Adaptive bandwidth"):
             rbf = GaussianKernel(1, 2.1, None)
