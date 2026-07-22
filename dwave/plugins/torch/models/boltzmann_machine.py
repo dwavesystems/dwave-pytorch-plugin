@@ -89,6 +89,12 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         edge_idx_i = torch.tensor([self._node_to_idx[i] for i, _ in self._edges])
         edge_idx_j = torch.tensor([self._node_to_idx[j] for _, j in self._edges])
 
+        if (edge_idx_i == edge_idx_j).any():
+            loop_indices = edge_idx_i[(edge_idx_i == edge_idx_j).argwhere()].tolist()
+            raise ValueError(
+                f"Self-loops are not allowed. Edge indices with self-loops: {loop_indices}"
+            )
+
         self.register_buffer("_edge_idx_i", edge_idx_i)
         self.register_buffer("_edge_idx_j", edge_idx_j)
 
@@ -311,8 +317,7 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         warnings.warn(
             f"`{self.__class__}.sample()()` is deprecated since dwave-pytorch-plugin "
             "0.3.0 and will be removed in 0.4.0. Use Use `dwave.plugins.torch.samplers` module "
-            "for all sampling-related tasks instead."
-            , DeprecationWarning
+            "for all sampling-related tasks instead.", DeprecationWarning
         )
 
         if sample_params is None:
@@ -343,8 +348,7 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         warnings.warn(
             f"`{self.__class__}.sampleset_to_tensor()` is deprecated since dwave-pytorch-plugin "
             "0.3.0 and will be removed in 0.4.0. Use Use `dwave.plugins.torch.samplers` module "
-            "for all sampling-related tasks instead."
-            , DeprecationWarning
+            "for all sampling-related tasks instead.", DeprecationWarning
         )
 
         return sampleset_to_tensor(self._nodes, sample_set, device)
