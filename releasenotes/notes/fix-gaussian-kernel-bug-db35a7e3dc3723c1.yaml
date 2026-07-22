@@ -1,0 +1,5 @@
+---
+fixes:
+  - |
+    The Gaussian kernel incorrectly computed pairwise distances with l2 norm without squaring it. This fixes the bug by squaring the l2 norm.
+

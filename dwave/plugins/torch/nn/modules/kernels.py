@@ -146,6 +146,6 @@ class GaussianKernel(Kernel):
         Returns:
             torch.Tensor: A (nx, ny) tensor representing the kernel matrix.
         """
-        distance_matrix = torch.cdist(x.flatten(1), y.flatten(1), p=2)
+        distance_matrix = torch.cdist(x.flatten(1), y.flatten(1), p=2)**2
         bandwidth = self._get_bandwidth(distance_matrix.detach()) * self.factors
         return torch.exp(-distance_matrix.unsqueeze(0) / bandwidth.reshape(-1, 1, 1)).sum(dim=0)
