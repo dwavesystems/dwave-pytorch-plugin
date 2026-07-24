@@ -15,13 +15,12 @@
 import unittest
 
 import torch
-from dimod import SPIN, BinaryQuadraticModel, IdentitySampler, SampleSet, TrackingComposite
-from parameterized import parameterized
+from dimod import IdentitySampler, SampleSet, TrackingComposite
 
 from dwave.plugins.torch.models.boltzmann_machine import GraphRestrictedBoltzmannMachine as GRBM
 from dwave.plugins.torch.samplers.dimod_sampler import DimodSampler
 from dwave.samplers import SteepestDescentSampler
-from dwave.system.temperatures import maximum_pseudolikelihood_temperature as mple
+from dwave.samplers import SimulatedAnnealingSampler
 
 
 class TestDimodSampler(unittest.TestCase):
@@ -92,6 +91,7 @@ class TestDimodSampler(unittest.TestCase):
                 torch.tensor(list(tracker.input['h'].values())),
                 torch.tensor([0, 0, 0, 0.0])
             )
+
         with self.subTest("Linear weights should be clipped to be within range."):
             grbm.linear.data[:] = torch.tensor([-2, -0.002, 0.002, 3])
             tracker = TrackingComposite(SteepestDescentSampler())
@@ -103,6 +103,7 @@ class TestDimodSampler(unittest.TestCase):
                 torch.tensor(list(tracker.input['h'].values())),
                 torch.tensor([-1, -0.2, 0.2, 1])
             )
+
         with self.subTest("Quadratic weights should be clipped to be within range."):
             grbm.quadratic.data[:] = torch.tensor([-2, -0.002, 0.002, 3])
             tracker = TrackingComposite(SteepestDescentSampler())
@@ -114,6 +115,7 @@ class TestDimodSampler(unittest.TestCase):
                 torch.tensor(list(tracker.input['J'].values())),
                 torch.tensor([-1, -0.2, 0.2, 1])
             )
+
         with self.subTest("Quadratic weights should be clipped to be 0."):
             grbm.quadratic.data[:] = torch.tensor([-2, -0.002, 0.002, 3])
             tracker = TrackingComposite(SteepestDescentSampler())
@@ -125,6 +127,117 @@ class TestDimodSampler(unittest.TestCase):
                 torch.tensor(list(tracker.input['J'].values())),
                 torch.tensor([0, 0, 0, 0.0])
             )
+
+        sampler = DimodSampler(
+            self.bm,
+            SimulatedAnnealingSampler(),
+            prefactor=1,
+            sample_kwargs=dict(num_reads=1)
+        )
+
+        x = torch.tensor([
+            [1.0, float("nan"), -1.0, float("nan")],
+            [float("nan"), -1.0, float("nan"), 1.0],
+        ])
+
+        samples = sampler.sample(x)
+
+        with self.subTest("Conditional sampling returns expected shape"):
+            # Shape check
+            self.assertTupleEqual(samples.shape, (2, 1, 4))
+        samples = samples.squeeze()
+
+        with self.subTest("Conditional sampling preserves clamped variables"):
+            # Check clamped values unchanged
+            mask = ~torch.isnan(x)
+            self.assertTrue(torch.all(samples[mask] == x[mask]))
+
+        with self.subTest("Conditional sampling samples free variables as ±1"):
+            # Check free variables are ±1
+            free_mask = torch.isnan(x)
+            free_values = samples[free_mask]
+            self.assertTrue(torch.all(torch.isin(free_values, torch.tensor([-1.0, 1.0]))),
+                            "Free variables should be sampled as ±1")
+
+        with self.subTest("Conditional sampling supports multiple reads."):
+            num_reads = 5
+            sampler = DimodSampler(
+                self.bm,
+                SimulatedAnnealingSampler(),
+                prefactor=1,
+                sample_kwargs=dict(num_reads=num_reads)
+            )
+
+            x = torch.tensor([
+                [1.0, float("nan"), -1.0, float("nan")],
+                [float("nan"), -1.0, float("nan"), 1.0],
+            ])
+
+            samples = sampler.sample(x)
+
+            # Shape should be (batch_size, num_reads, n_nodes)
+            self.assertTupleEqual(samples.shape, (2, 5, 4))
+
+            # Check clamped values for every read
+            mask = ~torch.isnan(x)
+            free_mask = torch.isnan(x)
+            for i in range(num_reads):
+                self.assertTrue(torch.all(samples[:, i, :][mask] == x[mask]))
+
+                free_values = samples[:, i, :][free_mask]
+                self.assertTrue(torch.all(torch.isin(free_values, torch.tensor([-1.0, 1.0]))),
+                                f"Free variables should be sampled as ±1 in read {i}")
+
+        with self.subTest("Conditional sampling with all variables clamped returns input unchanged."):
+            num_reads = 5
+            sampler = DimodSampler(
+                self.bm,
+                SimulatedAnnealingSampler(),
+                prefactor=1,
+                sample_kwargs=dict(num_reads=num_reads)
+            )
+
+            x = torch.tensor([
+                [+1.0, -1.0, -1.0, +1.0],
+                [-1.0, +1.0, -1.0, -1.0],
+            ])
+
+            samples = sampler.sample(x)
+            for i in range(num_reads):
+                torch.testing.assert_close(
+                    samples[:, i, :],
+                    x,
+                    msg=f"Fully clamped inputs should be preserved in read {i}"
+                )
+
+        with self.subTest("Conditional sampling supports mixed fully clamped and partially clamped rows."):
+            num_reads = 5
+            sampler = DimodSampler(
+                self.bm,
+                SimulatedAnnealingSampler(),
+                prefactor=1,
+                sample_kwargs=dict(num_reads=num_reads)
+            )
+
+            x = torch.tensor([
+                [1.0, -1.0, -1.0,  1.0],          # fully clamped
+                [-1.0, float("nan"), 1.0, -1.0],  # partially clamped
+            ])
+
+            samples = sampler.sample(x)
+
+            # First row fully clamped, should be preserved
+            for i in range(num_reads):
+                torch.testing.assert_close(
+                    samples[0, i, :],
+                    x[0],
+                    msg=f"Fully clamped row should be preserved in read {i}"
+                )
+
+            # Clamped values in the second row should be preserved
+            self.assertTrue(torch.all(samples[1, :, 0] == -1))
+            self.assertTrue(torch.all(samples[1, :, 2] == 1))
+            self.assertTrue(torch.all(samples[1, :, 3] == -1))
 
     def test_sample_set(self):
         grbm = GRBM(list("abcd"), [("a", "b")])

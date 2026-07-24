@@ -1,0 +1,4 @@
+---
+upgrade:
+  - |
+    Add conditional sampling functionality for the ``DimodSampler``.

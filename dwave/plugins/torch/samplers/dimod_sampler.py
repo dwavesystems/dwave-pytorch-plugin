@@ -13,10 +13,11 @@
 # limitations under the License.
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
 
 import torch
-from dimod import Sampler
+import dimod
+import warnings
 from hybrid.composers import AggregatedSamples
 
 from dwave.plugins.torch.models.boltzmann_machine import GraphRestrictedBoltzmannMachine
@@ -25,8 +26,10 @@ from dwave.plugins.torch.utils import sampleset_to_tensor
 
 if TYPE_CHECKING:
     import dimod
-
-    from dwave.plugins.torch.models.boltzmann_machine import GraphRestrictedBoltzmannMachine
+    from dimod import SampleSet
+    from dwave.plugins.torch.models.boltzmann_machine import (
+        GraphRestrictedBoltzmannMachine,
+    )
 
 
 __all__ = ["DimodSampler"]
@@ -57,13 +60,13 @@ class DimodSampler(TorchSampler):
     """
 
     def __init__(
-            self,
-            grbm: GraphRestrictedBoltzmannMachine,
-            sampler: dimod.Sampler,
-            prefactor: float,
-            linear_range: tuple[float, float] | None = None,
-            quadratic_range: tuple[float, float] | None = None,
-            sample_kwargs: dict[str, Any] | None = None
+        self,
+        grbm: GraphRestrictedBoltzmannMachine,
+        sampler: dimod.Sampler,
+        prefactor: float,
+        linear_range: tuple[float, float] | None = None,
+        quadratic_range: tuple[float, float] | None = None,
+        sample_kwargs: dict[str, Any] | None = None,
     ) -> None:
         self._grbm = grbm
 
@@ -85,25 +88,133 @@ class DimodSampler(TorchSampler):
     def sample(self, x: torch.Tensor | None = None) -> torch.Tensor:
         """Sample from the dimod sampler and return the corresponding tensor.
 
-        The sample set returned from the latest sample call is stored in :func:`DimodSampler.sample_set`
+        The sample set returned from the latest sample call is available via :attr:`DimodSampler.sample_set`
         which is overwritten by subsequent calls.
 
         Args:
             x (torch.Tensor): A tensor of shape (``batch_size``, ``dim``) or (``batch_size``, ``n_nodes``)
                 interpreted as a batch of partially-observed spins. Entries marked with ``torch.nan`` will
                 be sampled; entries with +/-1 values will remain constant.
+        Raises:
+            ValueError: If ``x`` has an invalid shape or contains values other than ±1 or NaN or if the
+                sampler returns more than one sample per input row.
+
+        Returns:
+            torch.Tensor: Sampled spin configurations with entries in ``{-1, +1}``.
+            If ``x is None`` the returned tensor has shape ``(num_reads, n_nodes)``.
+            Otherwise, the returned tensor has shape ``(batch_size, num_reads, n_nodes)``.
         """
-        if x is not None:
-            raise NotImplementedError("Support for conditional sampling has not been implemented.")
+        device = self._grbm.linear.device
+        n_nodes = self._grbm.n_nodes
 
         h, J = self._grbm.to_ising(self._prefactor, self._linear_range, self._quadratic_range)
-        self._sample_set = AggregatedSamples.spread(
-            self._sampler.sample_ising(h, J, **self._sampler_params)
-        )
 
-        # use same device as modules linear
-        device = self._grbm._linear.device
-        return sampleset_to_tensor(self._grbm.nodes, self._sample_set, device)
+        # Unconditional sampling
+        if x is None:
+            self._sample_set = AggregatedSamples.spread(
+                self._sampler.sample_ising(h, J, **self._sampler_params)
+            )
+            return self._sampleset_to_tensor(self._sample_set, device)
+
+        # Conditional sampling
+        if x.shape[1] != n_nodes:
+            raise ValueError(f"x must have shape (batch_size, {n_nodes})")
+
+        mask = ~torch.isnan(x)
+        if not torch.all(torch.isin(x[mask], torch.tensor([-1, 1], device=device))):
+            raise ValueError("x must contain only ±1 or NaN")
+
+        results = []
+        for row, row_mask in zip(x, mask):
+            # Fresh BQM
+            bqm = dimod.BinaryQuadraticModel.from_ising(h, J)
+
+            # Build conditioning dict
+            conditioned = {
+                node: int(val.item()) for node, val, m in zip(self._grbm.nodes, row, row_mask) if m
+            }
+
+            # Apply conditioning
+            if conditioned:
+                bqm.fix_variables(conditioned)
+
+            # Handle fully clamped case
+            if bqm.num_variables == 0:
+                num_reads = self._sampler_params.get("num_reads", 1)
+                full_read = torch.empty((num_reads, n_nodes), device=device)
+                for node, idx in self._grbm.node_to_idx.items():
+                    full_read[:, idx] = conditioned[node]
+                results.append(full_read)
+                continue
+
+            # Clip linear biases for remaining free variables
+            if self._linear_range is not None:
+                lb, ub = self._linear_range
+                for v, bias in bqm.iter_linear():
+                    if bias > ub:
+                        bqm.set_linear(v, ub)
+                    elif bias < lb:
+                        bqm.set_linear(v, lb)
+
+            # Clip quadratic biases
+            if self._quadratic_range is not None:
+                lb, ub = self._quadratic_range
+                for u, v, bias in bqm.iter_quadratic():
+                    if bias > ub:
+                        bqm.set_quadratic(u, v, ub)
+                    elif bias < lb:
+                        bqm.set_quadratic(u, v, lb)
+
+            # Storing the latest samples
+            self._sample_set = AggregatedSamples.spread(
+                self._sampler.sample(bqm, **self._sampler_params)
+            )
+            sample_array = self._sample_set.record.sample
+
+            num_reads = sample_array.shape[0]
+
+            full_read = torch.empty((num_reads, n_nodes), device=device)
+            var_to_idx = {v: i for i, v in enumerate(self._sample_set.variables)}
+
+            for node, idx in self._grbm.node_to_idx.items():
+                if node in conditioned:
+                    full_read[:, idx] = conditioned[node]
+                else:
+                    full_read[:, idx] = torch.from_numpy(sample_array[:, var_to_idx[node]]).to(
+                        device=device, dtype=torch.float
+                    )
+            results.append(full_read)
+
+        reference_shape = results[0].shape
+        if not all(result.shape == reference_shape for result in results):
+            raise ValueError(f"Expected all samples to have shape {reference_shape}")
+        # Stack to get (batch_size, num_reads, n_nodes)
+        samples = torch.stack(results, dim=0)
+        return samples
+
+    def _sampleset_to_tensor(self, sample_set: SampleSet, device: Optional[torch.device] = None) -> torch.Tensor:
+        """Converts a ``dimod.SampleSet`` to a ``torch.Tensor`` using GRBM node order.
+
+        Args:
+            sample_set (dimod.SampleSet): A sample set.
+            device (torch.device, optional): The device of the constructed tensor.
+                If ``None`` and data is a tensor then the device of data is used.
+                If ``None`` and data is not a tensor then the result tensor is constructed
+                on the current device.
+
+        Returns:
+            torch.Tensor: The sample set as a ``torch.Tensor``.
+        """
+        var_to_sample_i = {v: i for i, v in enumerate(sample_set.variables)}
+
+        # Convert dict -> ordered list by index
+        ordered_vars = [v for v, _ in sorted(self._grbm.node_to_idx.items(), key=lambda x: x[1])]
+
+        permutation = [var_to_sample_i[v] for v in ordered_vars]
+
+        sample = sample_set.record.sample[:, permutation]
+
+        return torch.from_numpy(sample).to(device=device, dtype=torch.float32)
 
     @property
     def sample_set(self) -> dimod.SampleSet:
