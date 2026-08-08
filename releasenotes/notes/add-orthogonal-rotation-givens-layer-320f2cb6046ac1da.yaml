@@ -1,0 +1,4 @@
+---
+features:
+  - |
+    Add orthogonal rotation layer using Givens rotations.
