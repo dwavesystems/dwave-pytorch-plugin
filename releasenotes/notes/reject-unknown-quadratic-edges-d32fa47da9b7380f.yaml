@@ -1,0 +1,5 @@
+---
+fixes:
+  - |
+    Raise a ``ValueError`` when ``GraphRestrictedBoltzmannMachine.set_quadratic`` receives an edge
+    that is not in the model. Previously, an unknown edge overwrote every quadratic bias.

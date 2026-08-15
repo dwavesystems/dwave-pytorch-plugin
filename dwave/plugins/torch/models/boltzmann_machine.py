@@ -134,6 +134,8 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         """
         for (u, v), bias in quadratic.items():
             idx = self._edge_to_idx.get((u, v), self._edge_to_idx.get((v, u)))
+            if idx is None:
+                raise ValueError(f"Edge {(u, v)!r} is not in the model.")
             self._quadratic.data[idx] = bias
 
     def _setup_hidden(self):

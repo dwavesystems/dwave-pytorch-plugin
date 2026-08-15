@@ -82,9 +82,17 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
             GRBM(self.nodes, self.edges, None, {"a": 0}, {("b", "c"): 0})
 
     def test_quadratic(self):
-        self.bm.set_quadratic({("d", "b"): 999})
+        self.bm.set_quadratic({("b", "a"): 999})
         self.assertEqual(999, self.bm.quadratic[0])
         self.bm.set_quadratic({})
+
+    def test_set_quadratic_unknown_edge(self):
+        quadratic = self.bm.quadratic.detach().clone()
+
+        with self.assertRaisesRegex(ValueError, r"Edge \('d', 'b'\) is not in the model"):
+            self.bm.set_quadratic({("d", "b"): 999})
+
+        torch.testing.assert_close(self.bm.quadratic, quadratic)
 
     def test_set_linear(self):
         self.bm.set_linear({"d": 999})
