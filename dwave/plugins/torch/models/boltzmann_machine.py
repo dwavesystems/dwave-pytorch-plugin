@@ -38,6 +38,7 @@ if TYPE_CHECKING:
 from dimod import BinaryQuadraticModel
 from hybrid.composers import AggregatedSamples
 
+from dwave.plugins.torch.nn.modules.utils import store_config
 from dwave.plugins.torch.utils import sampleset_to_tensor
 from dwave.system.temperatures import maximum_pseudolikelihood_temperature as mple
 
@@ -80,6 +81,7 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
     # that the prepared distribution is that of a paramagnet.
     _INIT_INVERSE_TEMP = 2.5
 
+    @store_config
     def __init__(
         self,
         nodes: Iterable[Hashable],
