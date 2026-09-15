@@ -70,6 +70,45 @@ class TestGraphRestrictedBoltzmannMachine(unittest.TestCase):
         self.assertAlmostEqual(bm.linear[2].item(), w1, 2)
         self.assertAlmostEqual(bm.quadratic[3].item(), w2, 2)
 
+    def test_config_defaults(self):
+        nodes = ["a", "b"]
+        edges = [("a", "b")]
+
+        bm = GRBM(nodes, edges)
+
+        self.assertDictEqual(
+            dict(bm.config),
+            {
+                "nodes": nodes,
+                "edges": edges,
+                "hidden_nodes": None,
+                "linear": None,
+                "quadratic": None,
+                "module_name": "GraphRestrictedBoltzmannMachine",
+            },
+        )
+
+    def test_config_explicit_arguments(self):
+        nodes = ["a", "b", "c"]
+        edges = [("a", "b"), ("b", "c")]
+        hidden_nodes = ["c"]
+        linear = {"a": 0.25}
+        quadratic = {("b", "c"): -0.5}
+
+        bm = GRBM(nodes, edges, hidden_nodes, linear, quadratic)
+
+        self.assertDictEqual(
+            dict(bm.config),
+            {
+                "nodes": nodes,
+                "edges": edges,
+                "hidden_nodes": hidden_nodes,
+                "linear": linear,
+                "quadratic": quadratic,
+                "module_name": "GraphRestrictedBoltzmannMachine",
+            },
+        )
+
     def test_default_quadratic_initialization_uses_connectivity(self):
         nodes = list("abcd")
         edges = [("a", "b"), ("a", "c"), ("a", "d"), ("b", "c")]
