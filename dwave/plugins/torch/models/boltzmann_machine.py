@@ -298,10 +298,30 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         return torch.cat([self._linear, self._quadratic])
 
     @overload
-    def sample(self, sampler: Sampler, as_tensor: Literal[True], **kwargs) -> torch.Tensor: ...
+    def sample(
+        self,
+        sampler: Sampler,
+        *,
+        prefactor: float,
+        linear_range: Optional[tuple[float, float]] = None,
+        quadratic_range: Optional[tuple[float, float]] = None,
+        device: Optional[torch.device] = None,
+        sample_params: Optional[dict] = None,
+        as_tensor: Literal[True] = True,
+    ) -> torch.Tensor: ...
 
     @overload
-    def sample(self, sampler: Sampler, as_tensor: Literal[False], **kwargs) -> SampleSet: ...
+    def sample(
+        self,
+        sampler: Sampler,
+        *,
+        prefactor: float,
+        linear_range: Optional[tuple[float, float]] = None,
+        quadratic_range: Optional[tuple[float, float]] = None,
+        device: Optional[torch.device] = None,
+        sample_params: Optional[dict] = None,
+        as_tensor: Literal[False],
+    ) -> SampleSet: ...
 
     def sample(
         self,
