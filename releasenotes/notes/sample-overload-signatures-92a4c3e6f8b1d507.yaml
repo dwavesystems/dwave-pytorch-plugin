@@ -1,0 +1,5 @@
+---
+fixes:
+  - |
+    Include all keyword-only parameters in the overloaded type signatures for
+    ``GraphRestrictedBoltzmannMachine.sample()``.
