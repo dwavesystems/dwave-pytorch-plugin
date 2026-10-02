@@ -46,6 +46,12 @@ class BlockSampler(TorchSampler):
     the limit of zero or infinite temperature. Decorrelation from an initial condition can be slower.
     Block-Gibbs represents best practice for independent sampling.
 
+    The Markov chains persist between calls to :meth:`sample`. Initial states are set
+    only when the sampler is constructed. Each call applies the full inverse temperature
+    schedule starting from the current chain states, rather than reinitializing them.
+    Consecutive samples can therefore be correlated. To start fresh chains, construct
+    a new sampler.
+
     Args:
         grbm (GRBM): The Graph-Restricted Boltzmann Machine to sample from.
         colouring (Callable[Hashable, Hashable]): A colouring function that maps a single
@@ -369,7 +375,16 @@ class BlockSampler(TorchSampler):
     
     @torch.no_grad
     def sample(self, x: torch.Tensor | None = None) -> torch.Tensor:
-        """Performs block updates.
+        """Advances the persistent Markov chains through the full schedule.
+
+        The final chain states are retained as the starting states for the next call.
+        When ``x`` is provided, its observed spins overwrite the corresponding current
+        states before the updates. Entries marked with ``torch.nan`` start from the
+        current chain states.
+
+        The returned tensor is a copy of the final states. Later calls do not change
+        previously returned samples, and modifying a returned tensor does not change
+        the sampler's internal state.
 
         Args:
             x (torch.Tensor): A tensor of shape (``batch_size``, ``dim``) or (``batch_size``, ``n_nodes``)
@@ -377,7 +392,8 @@ class BlockSampler(TorchSampler):
                 be sampled; entries with +/-1 values will remain constant.
 
         Returns:
-            torch.Tensor: A tensor of shape (batch_size, dim) of +/-1 values sampled from the model.
+            torch.Tensor: A tensor of shape (num_chains, grbm.n_nodes) of +/-1 values
+            sampled from the model.
         """
         if x is not None:
             clamp_mask = ~torch.isnan(x)
