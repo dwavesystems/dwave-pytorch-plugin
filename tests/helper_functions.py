@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import unittest.mock
 
+import numpy as np
 import torch
 from dimod import BinaryQuadraticModel
 
@@ -59,6 +60,26 @@ class ConstantKernel(Kernel):
 
     def _kernel(self, x, y):
         return self.matrix
+
+
+def enumerate_walsh(n: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Every state of ``{-1, +1}^n`` and every parity character, by direct enumeration.
+
+    Returns:
+        tuple[np.ndarray, np.ndarray, np.ndarray]: ``states`` of shape ``(2^n, n)`` (state ``a``
+        has spin ``1 - 2 * bit_i(a)`` at coordinate ``i``), ``orders`` of shape ``(2^n,)`` (the
+        size of subset ``S``), and ``chi`` of shape ``(2^n, 2^n)`` with ``chi[S, a]`` the parity
+        ``prod_{i in S} states[a, i]``.
+    """
+    m = 1 << n
+    states = np.array([[1 - 2 * ((z >> i) & 1) for i in range(n)] for z in range(m)], dtype=np.int8)
+    orders = np.array([bin(s).count("1") for s in range(m)])
+    chi = np.ones((m, m))
+    for subset in range(m):
+        for i in range(n):
+            if (subset >> i) & 1:
+                chi[subset] *= states[:, i]
+    return states, orders, chi
 
 
 # ---------------------------------------------------------------- exact tests of samplers -------
