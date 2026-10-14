@@ -3,3 +3,4 @@ codecov
 parameterized
 dwave-samplers
 dwave-graphs
+matplotlib
