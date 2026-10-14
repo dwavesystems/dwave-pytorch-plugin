@@ -13,4 +13,5 @@
 # limitations under the License.
 #
 
+from dwave.plugins.torch.models.baselines import *
 from dwave.plugins.torch.models.boltzmann_machine import *
