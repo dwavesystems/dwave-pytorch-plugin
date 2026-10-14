@@ -25,7 +25,7 @@ from dimod import BQM, ExactSolver
 
 from dwave.plugins.torch.graph import GraphIndex
 from dwave.plugins.torch.models import GraphRestrictedBoltzmannMachine as GRBM
-from dwave.plugins.torch.nn import GaussianKernel, Ising, Mean, SquaredMMD
+from dwave.plugins.torch.nn import Ising, Mean, SquaredMMD
 from dwave.plugins.torch.nn.functional import expectation, leave_one_out
 from dwave.plugins.torch.nn.functional import maximum_mean_discrepancy_loss as mmd_loss
 from dwave.plugins.torch.samplers import BlockSampler, DimodSampler
@@ -90,17 +90,20 @@ class DegreeThree(torch.nn.Module):
         return torch.stack(values, -1).mean(-1, keepdim=True)
 
 
+def gaussian_kernel(x, y):
+    """The Gaussian kernel of the battery, exp(-d / sqrt(N)) at the real distance d."""
+    n = x.shape[-1]
+    return torch.exp(-((n - x @ y.mT) / 2) / n ** 0.5)
+
+
 class BiasedMMD(torch.nn.Module):
     """The biased (V-statistic) squared MMD, which is symmetric but not a U-statistic."""
 
-    def __init__(self, kernel):
-        super().__init__()
-        self.kernel = kernel
-
     def forward(self, spins, reference):
         reference = reference.expand(*spins.shape[:-2], *reference.shape[-2:])
-        return (self.kernel(spins, spins).mean((-2, -1)) - 2 * self.kernel(spins, reference).mean((-2, -1))
-                + self.kernel(reference, reference).mean((-2, -1))).unsqueeze(-1)
+        return (gaussian_kernel(spins, spins).mean((-2, -1))
+                - 2 * gaussian_kernel(spins, reference).mean((-2, -1))
+                + gaussian_kernel(reference, reference).mean((-2, -1))).unsqueeze(-1)
 
 
 class ExpMean(torch.nn.Module):
@@ -122,7 +125,6 @@ class Scale(torch.nn.Module):
 
 
 REFERENCE = torch.tensor([[0.8, -0.9, 1.0], [-1.0, 1.0, 0.7]], dtype=torch.float64)
-KERNEL = GaussianKernel(1, bandwidth=2.0)
 
 
 class TestMean(unittest.TestCase):
@@ -163,40 +165,54 @@ class TestMean(unittest.TestCase):
 
 class TestSquaredMMD(unittest.TestCase):
     def test_matches_functional(self):
+        # One value per profile: [0] the Gaussian headline, [k] the order-k kernel
         spins = randspins(5, 3, seed=4).double()
-        statistic = SquaredMMD(KERNEL)
-        torch.testing.assert_close(
-            statistic(spins, REFERENCE), mmd_loss(spins, REFERENCE, KERNEL).reshape(1)
-        )
+        statistic = SquaredMMD()
+        self.assertEqual((4,), tuple(statistic(spins, REFERENCE).shape))
+        torch.testing.assert_close(statistic(spins, REFERENCE), mmd_loss(spins, REFERENCE))
         with self.subTest("Batches of sample sets, one reference sample for all"):
             batch = randspins(2, 5, 3, seed=5).double()
             values = statistic(batch, REFERENCE)
-            self.assertEqual((2, 1), tuple(values.shape))
+            self.assertEqual((2, 4), tuple(values.shape))
             for b in range(2):
-                torch.testing.assert_close(values[b, 0], mmd_loss(batch[b], REFERENCE, KERNEL))
+                torch.testing.assert_close(values[b], mmd_loss(batch[b], REFERENCE))
         with self.subTest("One reference sample per set"):
             references = torch.stack([REFERENCE, -REFERENCE])
             values = statistic(batch, references)
             for b in range(2):
-                torch.testing.assert_close(values[b, 0], mmd_loss(batch[b], references[b], KERNEL))
+                torch.testing.assert_close(values[b], mmd_loss(batch[b], references[b]))
+        with self.subTest("Kernel weights make the headline the alpha row"):
+            alpha = torch.tensor([0.5, 0.2, 0.3], dtype=torch.float64)
+            weighted = SquaredMMD(alpha)(batch, REFERENCE)
+            torch.testing.assert_close(weighted[:, 1:], values[:, 1:] * 0 + statistic(batch, REFERENCE)[:, 1:])
+            torch.testing.assert_close(weighted[:, 0], statistic(batch, REFERENCE)[:, 1:] @ alpha)
 
     def test_leave_one_out(self):
         spins = randspins(2, 6, 3, seed=6).double()
-        statistic = SquaredMMD(KERNEL)
-        generic = leave_one_out(lambda s, z: statistic(s, z), spins, REFERENCE)
-        torch.testing.assert_close(statistic.leave_one_out(spins, REFERENCE), generic)
-        with self.subTest("A data-dependent bandwidth is held fixed and the values are finite"):
-            adaptive = SquaredMMD(GaussianKernel(3))
-            self.assertTrue(adaptive.leave_one_out(spins, REFERENCE).isfinite().all())
+        for statistic in (SquaredMMD(), SquaredMMD(torch.tensor([0.5, 0.2, 0.3], dtype=torch.float64))):
+            with self.subTest(alpha=statistic.alpha):
+                generic = leave_one_out(lambda s, z: statistic(s, z), spins, REFERENCE)
+                self.assertEqual((2, 6, 4), tuple(generic.shape))
+                torch.testing.assert_close(statistic.leave_one_out(spins, REFERENCE), generic)
 
     def test_validation(self):
-        statistic = SquaredMMD(KERNEL)
+        statistic = SquaredMMD()
         with self.assertRaisesRegex(ValueError, "At least 2 samples"):
             statistic(randspins(1, 3).double(), REFERENCE)
         with self.assertRaisesRegex(ValueError, "At least 3 samples"):
             statistic.leave_one_out(randspins(2, 3).double(), REFERENCE)
         with self.assertRaisesRegex(ValueError, "At least two reference items"):
             statistic(randspins(4, 3).double(), REFERENCE[:1])
+        with self.assertRaisesRegex(ValueError, "spins per item"):
+            statistic(randspins(4, 3).double(), REFERENCE[:, :2])
+        with self.assertRaisesRegex(ValueError, r"soft spins in \[-1, 1\]"):
+            statistic(randspins(4, 3).double(), 2 * REFERENCE)
+        with self.assertRaisesRegex(ValueError, "floating dtype"):
+            statistic(randspins(4, 3).long(), REFERENCE)
+        with self.assertRaisesRegex(ValueError, "one weight per order"):
+            SquaredMMD(torch.ones(2))(randspins(4, 3).double(), REFERENCE)
+        with self.assertRaisesRegex(ValueError, "nonnegative"):
+            SquaredMMD(-torch.ones(3))
 
 
 class TestExpectation(unittest.TestCase):
@@ -210,8 +226,8 @@ class TestExpectation(unittest.TestCase):
             ("mean spins", Mean(), 3, torch.tensor([0.3, -1.2, 0.5], dtype=torch.float64), ()),
             ("mean sufficient statistics", Mean(GRAPH.statistics), 3,
              torch.arange(1.0, 7.0, dtype=torch.float64), ()),
-            ("squared MMD (degree 2)", SquaredMMD(KERNEL), 3, torch.ones(1, dtype=torch.float64),
-             (REFERENCE,)),
+            ("squared MMD (degree 2, every profile)", SquaredMMD(), 3,
+             torch.tensor([1.0, 0.3, -0.7, 0.2], dtype=torch.float64), (REFERENCE,)),
             ("degree 3", DegreeThree(), 4, torch.ones(1, dtype=torch.float64), ()),
         ]
         for name, statistic, n_samples, weights, inputs in cases:
@@ -226,7 +242,7 @@ class TestExpectation(unittest.TestCase):
         # over M - 1 samples, which differs from the one over M samples by the statistic's own bias
         linear, quadratic = biases(1)
         weights = torch.ones(1, dtype=torch.float64)
-        for name, statistic, inputs in [("V-statistic", BiasedMMD(KERNEL), (REFERENCE,)),
+        for name, statistic, inputs in [("V-statistic", BiasedMMD(), (REFERENCE,)),
                                         ("nonlinear in a mean", ExpMean(), ())]:
             with self.subTest(name):
                 estimate = mean_estimated_gradient(linear, quadratic, statistic, 3, weights, *inputs)
@@ -274,10 +290,10 @@ class TestExpectation(unittest.TestCase):
             torch.testing.assert_close(grad, (spins.mean(1) * upstream).sum())
         with self.subTest("The reference sample of the MMD receives its pathwise gradient"):
             reference = REFERENCE.clone().requires_grad_()
-            statistic = SquaredMMD(KERNEL)
+            statistic = SquaredMMD()
             y = expectation(GRAPH, linear, quadratic, spins, statistic, reference)
-            through_layer, = torch.autograd.grad(y.sum(), reference)
-            direct, = torch.autograd.grad(statistic(spins, reference).sum(), reference)
+            through_layer, = torch.autograd.grad(y[..., 0].sum(), reference)
+            direct, = torch.autograd.grad(statistic(spins, reference)[..., 0].sum(), reference)
             torch.testing.assert_close(through_layer, direct)
             self.assertIsNone(spins.grad)
 
@@ -286,9 +302,9 @@ class TestExpectation(unittest.TestCase):
         prior = GRBM("abc", [("a", "b"), ("b", "c")], linear={"a": 0.2}, quadratic={("a", "b"): -0.5})
         samples = BlockSampler(prior, num_chains=8, seed=0).sample()
         reference = randspins(5, 3, seed=8)
-        loss = expectation(prior, prior.linear, prior.quadratic, samples, SquaredMMD(GaussianKernel(2)), reference)
-        self.assertEqual((1,), tuple(loss.shape))
-        loss.sum().backward()
+        loss = expectation(prior, prior.linear, prior.quadratic, samples, SquaredMMD(), reference)
+        self.assertEqual((4,), tuple(loss.shape))
+        loss[0].backward()
         self.assertTrue(prior.linear.grad.isfinite().all() and prior.quadratic.grad.isfinite().all())
 
     def test_batch_dimensions(self):
@@ -336,7 +352,7 @@ class TestIsing(unittest.TestCase):
     EDGES = [("a", "b"), ("a", "c"), ("b", "c")]
 
     def test_has_properties(self):
-        statistic = SquaredMMD(GaussianKernel(2))
+        statistic = SquaredMMD()
         ising = Ising(self.NODES, self.EDGES, statistic=statistic)
         self.assertTupleEqual(("a", "b", "c"), ising.nodes)
         self.assertTupleEqual((("a", "b"), ("a", "c"), ("b", "c")), ising.edges)
@@ -393,9 +409,9 @@ class TestIsing(unittest.TestCase):
         for grad, expected_grad in zip(grads, expected_grads):
             torch.testing.assert_close(grad, expected_grad)
         with self.subTest("Further inputs are passed to the statistic"):
-            ising = Ising(self.NODES, self.EDGES, statistic=SquaredMMD(GaussianKernel(2)))
+            ising = Ising(self.NODES, self.EDGES, statistic=SquaredMMD())
             reference = randspins(4, 3, seed=11)
-            self.assertEqual((2, 1), tuple(ising(linear, quadratic, spins, reference).shape))
+            self.assertEqual((2, 4), tuple(ising(linear, quadratic, spins, reference).shape))
 
     def test_input_validation(self):
         ising = Ising("abc", [("a", "b")])
@@ -494,9 +510,9 @@ class TestIsing(unittest.TestCase):
             torch.testing.assert_close(ising(linear, quadratic, spins), -torch.ones(bs, 3))
 
     def test_statistic_moves_with_layer(self):
-        ising = Ising("abc", [("a", "b")], statistic=SquaredMMD(GaussianKernel(2))).to("meta")
-        self.assertEqual("meta", ising.statistic.kernel.factors.device.type)
-        self.assertIn("statistic.kernel.factors", ising.state_dict())
+        ising = Ising("abc", [("a", "b")], statistic=SquaredMMD(torch.ones(3))).to("meta")
+        self.assertEqual("meta", ising.statistic.alpha.device.type)
+        self.assertIn("statistic.alpha", ising.state_dict())
 
 
 if __name__ == "__main__":

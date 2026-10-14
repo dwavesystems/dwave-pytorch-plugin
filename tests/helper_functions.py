@@ -21,7 +21,6 @@ from dimod import BinaryQuadraticModel
 
 from dwave.plugins.torch.graph import randspin
 from dwave.plugins.torch.models.boltzmann_machine import GraphRestrictedBoltzmannMachine as GRBM
-from dwave.plugins.torch.nn.modules.kernels import Kernel
 from dwave.plugins.torch.utils import to_bqm
 
 
@@ -40,26 +39,6 @@ def model_to_bqm(bm: GRBM) -> BinaryQuadraticModel:
 def randspins(*shape, seed: int = 0) -> torch.Tensor:
     """Random spins of the given shape, drawn from a generator seeded with ``seed``."""
     return randspin(shape, generator=torch.Generator().manual_seed(seed)).float()
-
-
-class ConstantKernel(Kernel):
-    """A kernel whose matrix is a fixed constant irrespective of its inputs.
-
-    Args:
-        matrix: The kernel matrix. Defaults to a 4-by-4 matrix.
-    """
-
-    def __init__(self, matrix: list[list[float]] | None = None) -> None:
-        super().__init__()
-        if matrix is None:
-            matrix = [[10, 4, 0, 1],
-                      [4, 10, 4, 2],
-                      [0, 4, 10, 3],
-                      [1, 2, 3, 10]]
-        self.matrix = torch.as_tensor(matrix, dtype=torch.float32)
-
-    def _kernel(self, x, y):
-        return self.matrix
 
 
 def enumerate_walsh(n: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:

@@ -58,10 +58,10 @@ The package provides the following components.
   are trained through the layer) and ``SquaredMMD`` (the squared maximum mean discrepancy to a
   reference sample) are provided. The estimator itself,
   ``dwave.plugins.torch.nn.functional.expectation``, takes any graph module, which is how a
-  Boltzmann machine prior is trained by the maximum mean discrepancy. Also included are a
-  ``GaussianKernel`` and a ``MaximumMeanDiscrepancyLoss`` for matching encoder samples to prior
-  samples, and, in ``dwave.plugins.torch.nn.functional``, the functional losses and the
-  Gumbel-softmax sampling of spins from encoder logits.
+  Boltzmann machine prior is trained by the maximum mean discrepancy. Also included is a
+  ``MaximumMeanDiscrepancyLoss`` for matching encoder samples to prior samples, and, in
+  ``dwave.plugins.torch.nn.functional``, the functional losses and the Gumbel-softmax sampling
+  of spins from encoder logits.
 
 * **Graph core** (``dwave.plugins.torch.graph``). ``GraphIndex``, the graph module that models,
   layers and samplers are built on, and random spin generation. It imports nothing but PyTorch.
@@ -217,17 +217,20 @@ differentiated with respect to the machine's biases by
 estimate of the gradient of the statistic's expectation to the statistic's value. With the squared
 maximum mean discrepancy as the statistic, a Boltzmann machine prior is pulled towards a reference
 sample ``z``, for example the spins an encoder assigns to a batch of data, while ``z`` receives its
-own gradient through the kernel:
+own gradient through the kernel. The statistic returns one estimate per kernel of the battery:
+entry 0 the headline kernel (the Gaussian kernel at the bandwidth set by the dimension, or a
+calibrated combination of the orders) and entry ``k`` the order-``k`` kernel, which measures the
+mismatch of the ``k``-spin parities alone.
 
 .. code-block:: python
 
-    from dwave.plugins.torch.nn import GaussianKernel, SquaredMMD
+    from dwave.plugins.torch.nn import SquaredMMD
     from dwave.plugins.torch.nn.functional import expectation
 
-    mmd = SquaredMMD(GaussianKernel(3))
+    mmd = SquaredMMD()
     samples = sampler.sample()  # (M, n_nodes) samples of the prior, M >= 3
     loss = expectation(grbm, grbm.linear, grbm.quadratic, samples, mmd, z)  # z: (R, n_nodes)
-    loss.sum().backward()  # gradients for the prior and for whatever produced z
+    loss[0].backward()  # the headline: gradients for the prior and for whatever produced z
 
 The ``Ising`` layer is the same estimator for biases produced by another network:
 ``Ising(nodes, edges, statistic)(linear, quadratic, spins, *inputs)``.

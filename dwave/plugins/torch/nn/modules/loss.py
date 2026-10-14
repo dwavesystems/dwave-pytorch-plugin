@@ -14,41 +14,66 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import torch
 import torch.nn as nn
 
+from dwave.plugins.torch.kernels import _validate_alpha
 from dwave.plugins.torch.nn.functional import maximum_mean_discrepancy_loss as mmd_loss
-
-if TYPE_CHECKING:
-    from dwave.plugins.torch.nn.modules.kernels import Kernel
 
 __all__ = ["MaximumMeanDiscrepancyLoss"]
 
 
 class MaximumMeanDiscrepancyLoss(nn.Module):
-    """An unbiased estimator for the squared maximum mean discrepancy (MMD) as a loss function.
+    """The unbiased squared maximum mean discrepancy (MMD) between two samples of spins, under
+    every kernel of the battery, as a loss module.
 
-    This uses the ``dwave.plugins.torch.nn.functional.maximum_mean_discrepancy_loss`` function to
-    compute the loss.
+    A module wrapper of :func:`~dwave.plugins.torch.nn.functional.maximum_mean_discrepancy_loss`:
+    the forward pass returns one estimate per profile, entry 0 the headline kernel (the Gaussian
+    kernel, or the alpha row when kernel weights are held) and entry ``k`` the order-``k``
+    kernel, differentiable in both samples, which may be hard or soft spins in ``[-1, 1]``.
+    ``loss(x, y)[0].backward()`` trains on the headline. The kernel weights are a buffer, so they
+    move with :meth:`~torch.nn.Module.to` and are saved in :meth:`~torch.nn.Module.state_dict`.
 
     Args:
-        kernel (Kernel): A kernel function object.
+        alpha (torch.Tensor, optional): Kernel weights over orders ``1..dim``, a 1-D tensor of
+            finite nonnegative entries with at least one positive, for example the weights an
+            :class:`~dwave.plugins.torch.evaluation.Evaluator` calibrated. Defaults to ``None``,
+            the Gaussian headline.
+        block_size (int, optional): Rows per block of the paired blocked estimate; ``>= 2`` and a
+            divisor of the samples' common row count. Defaults to ``None``, one block.
+
+    Attributes:
+        alpha (torch.Tensor | None): The kernel weights, a buffer, or ``None``.
+        block_size (int | None): Rows per block.
+
+    Raises:
+        ValueError: If ``alpha`` is not a 1-D tensor of finite nonnegative entries with at least
+            one positive.
     """
 
-    def __init__(self, kernel: Kernel) -> None:
+    alpha: torch.Tensor | None
+
+    def __init__(self, alpha: torch.Tensor | None = None, block_size: int | None = None) -> None:
         super().__init__()
-        self.kernel = kernel
+        if alpha is not None:
+            _validate_alpha(alpha)
+            alpha = alpha.clone()
+        self.register_buffer("alpha", alpha)
+        self.block_size = block_size
+
+    def extra_repr(self) -> str:
+        head = "gaussian" if self.alpha is None else f"alpha of {self.alpha.shape[0]} orders"
+        return f"headline={head}, block_size={self.block_size}"
 
     def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        """Computes the MMD loss between two sets of samples ``x`` and ``y``.
+        """Computes the per-profile MMD estimates between two samples ``x`` and ``y``.
 
         Args:
-            x (torch.Tensor): A (n_x, f1, f2, ...) tensor of samples from distribution p.
-            y (torch.Tensor): A (n_y, f1, f2, ...) tensor of samples from distribution q.
+            x (torch.Tensor): A ``(n_x, dim)`` tensor of hard or soft spins from distribution p.
+            y (torch.Tensor): A ``(n_y, dim)`` tensor of hard or soft spins from distribution q.
 
         Returns:
-            torch.Tensor: The computed MMD loss.
+            torch.Tensor: A ``(dim + 1,)`` tensor of unbiased squared MMD estimates, entry 0 the
+            headline kernel and entry ``k`` the order-``k`` kernel.
         """
-        return mmd_loss(x, y, self.kernel)
+        return mmd_loss(x, y, self.alpha, self.block_size)

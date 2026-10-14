@@ -14,23 +14,33 @@
 import unittest
 
 import torch
-from parameterized import parameterized
 
 from dwave.plugins.torch.nn.functional import maximum_mean_discrepancy_loss as mmd_loss
 from dwave.plugins.torch.nn.modules.loss import MaximumMeanDiscrepancyLoss as MMDLoss
-from tests.helper_functions import ConstantKernel
+from tests.helper_functions import randspins
 
 
 class TestMaximumMeanDiscrepancyLoss(unittest.TestCase):
-    @parameterized.expand([
-        (torch.tensor([[1.2], [4.1]]), torch.tensor([[0.3], [0.5]])),
-        (torch.randn((123, 4, 3, 2)), torch.rand(100, 4, 3, 2)),
-    ])
-    def test_mmd_loss(self, x, y):
-        # The resulting kernel matrix will be constant, so (averages) KXX = KYY = 2KXY
-        kernel = ConstantKernel()
-        compute_mmd = MMDLoss(kernel)
-        torch.testing.assert_close(mmd_loss(x, y, kernel), compute_mmd(x, y))
+    def test_module_is_the_functional(self):
+        x, y = randspins(8, 5, seed=1).double(), torch.tanh(randspins(8, 5, seed=2).double() * 0.7)
+        torch.testing.assert_close(MMDLoss()(x, y), mmd_loss(x, y))
+        alpha = torch.tensor([0.1, 0.2, 0.3, 0.0, 0.4], dtype=torch.float64)
+        torch.testing.assert_close(MMDLoss(alpha, block_size=4)(x, y), mmd_loss(x, y, alpha, 4))
+        self.assertEqual((6,), tuple(MMDLoss()(x, y).shape))
+
+    def test_kernel_weights_are_a_buffer(self):
+        alpha = torch.tensor([0.5, 0.5])
+        loss = MMDLoss(alpha)
+        self.assertIn("alpha", loss.state_dict())
+        self.assertEqual(0, len(list(loss.parameters())))
+        alpha.zero_()  # held as a copy
+        torch.testing.assert_close(loss.alpha, torch.tensor([0.5, 0.5]))
+        self.assertEqual("meta", loss.to("meta").alpha.device.type)
+        self.assertNotIn("alpha", MMDLoss().state_dict())
+        self.assertIn("alpha of 2 orders", repr(loss))
+        self.assertIn("gaussian", repr(MMDLoss()))
+        with self.assertRaisesRegex(ValueError, "nonnegative"):
+            MMDLoss(-alpha)
 
 
 if __name__ == "__main__":

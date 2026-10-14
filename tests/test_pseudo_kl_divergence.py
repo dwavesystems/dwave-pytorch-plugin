@@ -36,7 +36,6 @@ from dwave.plugins.torch.models.boltzmann_machine import GraphRestrictedBoltzman
 from dwave.plugins.torch.nn.functional import gumbel_spins
 from dwave.plugins.torch.nn.functional import maximum_mean_discrepancy_loss as mmd_loss
 from dwave.plugins.torch.nn.functional import pseudo_kl_divergence_loss
-from dwave.plugins.torch.nn.modules.kernels import GaussianKernel
 from dwave.plugins.torch.samplers import DimodSampler
 
 
@@ -237,7 +236,7 @@ class TestDiscreteAutoencoderObjectives(unittest.TestCase):
         with self.subTest("The maximum mean discrepancy also reaches the encoder"):
             encoder.zero_grad()
             spins = sign_map(encoder(CORNERS), n_samples=1)
-            mmd_loss(spins.flatten(1), SPINS, GaussianKernel(3)).backward()
+            mmd_loss(spins.flatten(1), SPINS)[0].backward()
             self.assertTrue(torch.any(encoder.weight.grad != 0))
 
     def test_uniform_prior_is_a_fixed_point_of_uniform_data(self):
