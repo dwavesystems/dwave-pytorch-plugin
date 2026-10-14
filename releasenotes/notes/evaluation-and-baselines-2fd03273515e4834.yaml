@@ -1,0 +1,82 @@
+---
+features:
+  - |
+    New subpackage ``dwave.plugins.torch.evaluation`` for evaluating generative models of spins
+    from samples alone: kernel scores by interaction order. ``blocked_scores`` is an exactly
+    unbiased, blocked U-statistic estimate of the squared maximum mean discrepancy (MMD) of any
+    number of models against the same blocks of a reference sample, under a battery of
+    Hamming-isotropic kernels read off one Hamming-distance histogram per block pair; ``UNIFORM``
+    scores the analytic uniform distribution without a sample. ``Evaluator(train, val, test,
+    block_size)`` holds three data splits and serves ``score`` and ``uniform_score`` (per-profile
+    estimates with standard errors over blocks: entry 0 the headline kernel, entry ``k`` the
+    order-``k`` kernel, whose score is the mean squared error per order-``k`` parity
+    coefficient), ``blocked`` (several models at once), ``calibrate`` (two-level kernel weights
+    on the orders a test-sized sample can measure, fitted on the calibration splits alone and
+    returned as a ``Calibration`` record), and ``compute_loss`` (the differentiable training
+    loss against a batch of a split). ``dwave.plugins.torch.evaluation.visualize`` draws the
+    Fourier weight by interaction order and the kernels' Walsh spectra with matplotlib, an
+    optional dependency. See ``docs/evaluation.md`` and ``examples/evaluation.py``.
+  - |
+    New module ``dwave.plugins.torch.kernels``: the Hamming-isotropic kernel battery on spins.
+    ``kernel_profiles(dim)`` is the table whose row 0 is the Gaussian kernel ``exp(-d_H /
+    sqrt(dim))`` (the Gaussian radial-basis-function kernel at the bandwidth ``sqrt(dim)``, on
+    which the Hamming distance concentrates) and whose row ``k`` is the order-``k`` kernel
+    ``K_k(d_H) / C(dim, k)``, the average parity agreement of the ``C(dim, k)`` parities of order
+    ``k`` (``K_k`` the Kravchuk polynomial), computed by a normalized recurrence and its exact
+    reflection so that every order is representable at any dimension; ``uniform_kernel_mean``
+    is a kernel's mean against the uniform distribution in closed form; ``KravchukSums`` sums the
+    order kernels at real distances with a hand-written backward pass whose memory does not
+    grow with the dimension, and ``kernel_means`` builds the per-profile kernel means of every
+    loss from it.
+  - |
+    New module ``dwave.plugins.torch.models.baselines``, exported by
+    ``dwave.plugins.torch.models``: moment-matched baselines of spins with one ``fit(x)`` /
+    ``sample(n, generator=None)`` interface, weakest first, against which a candidate model's
+    score is read. ``UniformBernoulli`` draws fair coins, ``IndependentBernoulli`` independent
+    spins at the data's per-spin means, and ``DichotomizedGaussian`` the signs of a latent
+    multivariate normal matched exactly to the data's means and pairwise tables by the
+    tetrachoric inversion of the bivariate normal distribution function (Jeffreys-smoothed, with
+    the pairwise solutions projected onto the nearest correlation matrix by Higham's alternating
+    projections; ``fit_info`` carries the diagnostics). ``BASELINES`` maps a name to each
+    constructor. See ``docs/baselines.md`` and ``examples/baselines.py``.
+  - |
+    ``maximum_mean_discrepancy_loss(x, y, alpha=None, block_size=None)``,
+    ``MaximumMeanDiscrepancyLoss(alpha=None, block_size=None)`` and the ``SquaredMMD(alpha=None)``
+    statistic of the ``Ising`` layer now estimate the squared MMD under every kernel of the
+    battery at once and return one unbiased estimate per profile (entry 0 the headline, entry
+    ``k`` the order-``k`` kernel), evaluated at the real distance ``(dim - <x, y>) / 2`` so that
+    hard spins give the exact estimate and soft spins in ``[-1, 1]`` a smooth surrogate with
+    gradients to both samples. Kernel weights ``alpha`` over the orders (for example the ones an
+    ``Evaluator`` calibrated) make the headline the corresponding alpha row; they are a buffer
+    of the modules. ``SquaredMMD`` accepts a soft reference sample and batches of sample sets as
+    before, and its leave-one-out values are closed form in the row means of the kernel
+    matrices, so the score-function gradient of ``expectation`` costs one sweep of
+    ``KravchukSums``.
+upgrade:
+  - |
+    ``Kernel`` and ``GaussianKernel`` (the Euclidean Gaussian kernel with a data-dependent
+    bandwidth) and the module ``dwave.plugins.torch.nn.modules.kernels`` are removed; the
+    kernels are the fixed Hamming-isotropic battery of ``dwave.plugins.torch.kernels``, whose
+    Gaussian bandwidth ``sqrt(dim)`` is set by the dimension. ``maximum_mean_discrepancy_loss``
+    no longer takes a kernel: it takes two ``(n, dim)`` samples of hard or soft spins in
+    ``[-1, 1]`` (items with several feature dimensions are flattened by the caller) and returns a
+    ``(dim + 1,)`` tensor instead of a scalar; ``MaximumMeanDiscrepancyLoss(kernel)`` becomes
+    ``MaximumMeanDiscrepancyLoss(alpha=None, block_size=None)``, and ``SquaredMMD(kernel)``
+    becomes ``SquaredMMD(alpha=None)`` and returns ``(..., dim + 1)`` values, so a loss on its
+    headline is ``expectation(...)[..., 0]`` (or ``loss[0]`` for the functional and the module).
+    The ``Ising`` layer with a ``SquaredMMD`` statistic therefore outputs ``dim + 1`` values per
+    model.
+  - |
+    ``matplotlib`` and ``scipy`` are test requirements; ``matplotlib`` is needed at run time only
+    by ``dwave.plugins.torch.evaluation.visualize`` and the figures of the examples.
+fixes:
+  - |
+    The score-function gradient of ``expectation`` with a ``SquaredMMD`` statistic is now
+    unbiased for every kernel of the battery: the removed ``GaussianKernel`` estimated its
+    bandwidth from the pooled samples, so the leave-one-out values held a bandwidth that still
+    depended on the left-out sample and the gradient was biased by several percent even in
+    expectation over exact enumeration; the battery's bandwidth is fixed by the dimension.
+  - |
+    The maximum mean discrepancy of identical samples is finite (zero for a point mass): the
+    removed ``GaussianKernel`` divided by a zero data-dependent bandwidth and returned ``NaN``
+    kernels, losses and prior gradients for collapsed samples.
