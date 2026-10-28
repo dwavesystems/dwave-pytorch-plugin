@@ -83,7 +83,7 @@ class GaussianKernel(Kernel):
     """The Gaussian kernel.
 
     This kernel between two data points x and y is defined as
-    :math:`k(x, y) = exp(-||x-y||^2 / (2 * \sigma))`, where :math:`\sigma` is the bandwidth
+    :math:`k(x, y) = exp(-||x-y||^2 / \sigma)`, where :math:`\sigma` is the bandwidth
     parameter.
 
     This implementation considers aggregating multiple Gaussian kernels with different
@@ -135,7 +135,7 @@ class GaussianKernel(Kernel):
         """Compute the Gaussian kernel between ``x`` and ``y``.
 
         .. math::
-            k(x, y) = \sum_{i=1}^{num\_features} exp(-||x-y||^2 / (2 * \sigma_i)),
+            k(x, y) = \sum_{i=1}^{num\_features} exp(-||x-y||^2 / \sigma_i),
 
         where :math:`\sigma_i` are the bandwidths.
 
