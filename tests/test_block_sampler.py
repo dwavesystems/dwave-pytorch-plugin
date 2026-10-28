@@ -75,6 +75,42 @@ class TestBlockSampler(unittest.TestCase):
         # NOTE: "meta" device is not supported for torch.Generator
         self.assertEqual("cpu", bss._rng.device.type)
 
+    def test_sample_preserves_chains_between_calls(self):
+        grbm = GRBM(list("ab"), [("a", "b")], quadratic={("a", "b"): 0.0})
+        sampler = BlockSampler(
+            grbm, self.crayon_veqa, 1, [1.0], "Metropolis",
+            initial_states=torch.tensor([[-1, 1]]), seed=1,
+        )
+
+        # At zero energy, Metropolis accepts every flip, so no statistical tolerance is needed.
+        first = sampler.sample()
+        torch.testing.assert_close(first, torch.tensor([[1.0, -1.0]]))
+        second = sampler.sample()
+        torch.testing.assert_close(second, torch.tensor([[-1.0, 1.0]]))
+        torch.testing.assert_close(first, torch.tensor([[1.0, -1.0]]))
+
+    def test_returned_sample_does_not_change_chain_state(self):
+        grbm = GRBM(list("ab"), [("a", "b")], quadratic={("a", "b"): 0.0})
+        sampler = BlockSampler(
+            grbm, self.crayon_veqa, 1, [1.0], "Metropolis",
+            initial_states=torch.tensor([[-1, 1]]), seed=1,
+        )
+
+        returned = sampler.sample()
+        returned.fill_(1)
+        torch.testing.assert_close(sampler.sample(), torch.tensor([[-1.0, 1.0]]))
+
+    def test_conditional_sample_preserves_chains_for_next_call(self):
+        grbm = GRBM(list("ab"), [("a", "b")], quadratic={("a", "b"): 0.0})
+        sampler = BlockSampler(
+            grbm, self.crayon_veqa, 1, [1.0], "Metropolis",
+            initial_states=torch.tensor([[-1, 1]]), seed=1,
+        )
+
+        conditional = sampler.sample(torch.tensor([[1.0, torch.nan]]))
+        torch.testing.assert_close(conditional, torch.tensor([[1.0, -1.0]]))
+        torch.testing.assert_close(sampler.sample(), torch.tensor([[-1.0, 1.0]]))
+
     def test_gibbs_update(self):
         grbm = GRBM(list("ab"), [["a", "b"]])
 

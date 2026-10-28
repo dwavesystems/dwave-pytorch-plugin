@@ -1,0 +1,5 @@
+---
+other:
+  - |
+    Document that ``BlockSampler`` retains its Markov chain states between
+    sampling calls and returns copied snapshots of the final states.
