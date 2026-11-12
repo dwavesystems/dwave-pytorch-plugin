@@ -379,12 +379,13 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         if sample_params is None:
             sample_params = dict()
         h, J = self.to_ising(prefactor, linear_range, quadratic_range)
-        sample_set = spread(sampler.sample_ising(h, J, **sample_params))
+        sample_set = sampler.sample_ising(h, J, **sample_params)
 
         if as_tensor:
+            # ``sampleset_to_tensor`` repeats aggregated samples according to their occurrences
             return self.sampleset_to_tensor(sample_set, device=device)
 
-        return sample_set
+        return spread(sample_set)
 
     def sampleset_to_tensor(
         self, sample_set: SampleSet, device: Optional[torch.device] = None

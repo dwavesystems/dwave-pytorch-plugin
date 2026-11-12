@@ -11,17 +11,3 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-import unittest
-
-from dwave.plugins.torch.tensor import randspin
-
-
-class TestTensor(unittest.TestCase):
-
-    def test_rands(self):
-        self.assertSetEqual({-1, 1}, set(randspin((2000,)).unique().tolist()))
-
-
-if __name__ == "__main__":
-    unittest.main()

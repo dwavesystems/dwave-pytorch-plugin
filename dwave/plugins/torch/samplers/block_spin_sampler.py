@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 from dwave.plugins.torch.samplers.base import TorchSampler
 from dwave.plugins.torch.nn.functional import bit2spin_soft
-from dwave.plugins.torch.tensor import randspin
+from dwave.plugins.torch.graph import randspin
 
 __all__ = ["BlockSampler"]
 
