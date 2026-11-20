@@ -36,13 +36,10 @@ if TYPE_CHECKING:
     from dimod import Sampler, SampleSet
 
 from dimod import BinaryQuadraticModel
-from hybrid.composers import AggregatedSamples
 
 from dwave.plugins.torch.nn.modules.utils import store_config
 from dwave.plugins.torch.utils import sampleset_to_tensor
 from dwave.system.temperatures import maximum_pseudolikelihood_temperature as mple
-
-spread = AggregatedSamples.spread
 
 
 __all__ = ["GraphRestrictedBoltzmannMachine"]
@@ -379,9 +376,10 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
         if sample_params is None:
             sample_params = dict()
         h, J = self.to_ising(prefactor, linear_range, quadratic_range)
-        sample_set = spread(sampler.sample_ising(h, J, **sample_params))
+        sample_set = sampler.sample_ising(h, J, **sample_params)
 
         if as_tensor:
+            # ``sampleset_to_tensor`` repeats aggregated samples according to their occurrences
             return self.sampleset_to_tensor(sample_set, device=device)
 
         return sample_set
