@@ -1,0 +1,24 @@
+---
+features:
+  - |
+    New module ``dwave.plugins.torch.pseudolikelihood``: maximum pseudolikelihood estimation of
+    Ising models on a graph, in PyTorch. ``negative_log_pseudolikelihood(graph, linear,
+    quadratic, spins, reduction)`` is the sum over the nodes of the negative log probability of
+    each spin given all the others, ``sum_i softplus(2 s_i theta_i)`` with ``theta`` the
+    effective fields, for a single model or a batch of models and differentiable in the biases,
+    as a training loss or a held-out score. ``fit_pseudolikelihood(graph, spins, ...)``
+    minimizes its mean over a sample with L-BFGS in float64, from the origin since the objective
+    is convex, processing the sample in chunks of ``sample_chunk`` rows so that memory does not
+    grow with it, with optional ``l1`` and ``l2`` penalties that bound the estimate on degenerate
+    data (a node whose spin, or an edge whose endpoint product, is constant across the sample),
+    which the pure fit refuses; it returns a ``PseudolikelihoodFit`` holding the biases and the
+    diagnostics of the fit (the NLPL, the gradient norm, the iteration and evaluation counts and
+    a convergence flag). ``fit_inverse_temperature(graph, linear, quadratic, spins, ...)`` is the
+    estimator of Raymond, Yarkoni and Andriyash (*Global Warming: Temperature Estimation in
+    Annealers*): with the biases held fixed, the inverse temperature at which the spins were
+    sampled is the maximizer of the pseudolikelihood over one scale, found by Newton's method on
+    its derivative from zero, which converges monotonically, for a batch of models at once, with
+    the sandwich standard error and the exact ``±inf`` limits of a sample without excitations or
+    without relaxed spins; it returns an ``InverseTemperatureFit``. The effective fields are
+    evaluated by the dense coupling matrix of ``GraphIndex`` or, on large sparse graphs, by two
+    scatters over the edges.
