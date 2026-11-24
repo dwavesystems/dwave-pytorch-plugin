@@ -380,7 +380,7 @@ class GraphRestrictedBoltzmannMachine(torch.nn.Module):
 
         if as_tensor:
             # ``sampleset_to_tensor`` repeats aggregated samples according to their occurrences
-            return self.sampleset_to_tensor(sample_set, device=device)
+            return sampleset_to_tensor(self._nodes, sample_set, device)
 
         return sample_set
 

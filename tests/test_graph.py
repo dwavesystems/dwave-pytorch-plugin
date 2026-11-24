@@ -86,28 +86,22 @@ class TestGraphIndex(unittest.TestCase):
             self.assertTupleEqual(graph.nodes, pickle.loads(pickle.dumps(graph)).nodes)
             self.assertTupleEqual(graph.edges, pickle.loads(pickle.dumps(graph)).edges)
 
-    def test_dense_quadratic(self):
-        graph = GraphIndex("abc", [("b", "a"), ("a", "c"), ("b", "c")])
-        per_edge = torch.tensor([[1.0, 2.0, 3.0], [-1.0, -2.0, -3.0]])
-        dense = graph.dense_quadratic(per_edge)
-        self.assertEqual((2, 3, 3), tuple(dense.shape))
-        torch.testing.assert_close(dense[0], torch.tensor([[0.0, 1.0, 2.0],
-                                                           [0.0, 0.0, 3.0],
-                                                           [0.0, 0.0, 0.0]]))
-        torch.testing.assert_close(dense[..., graph.edge_idx_i, graph.edge_idx_j], per_edge)
-        with self.assertRaisesRegex(ValueError, "Expected 3 edge biases"):
-            graph.dense_quadratic(torch.zeros(2, 2))
-
-    def test_symmetric_quadratic(self):
+    def test_quadratic_matrix(self):
         # Row k holds the couplings of node k, in the node order d, b, a, c
         expected = torch.tensor([[0.0, 0.0, 3.0, 0.0],
                                  [0.0, 0.0, 1.0, -4.0],
                                  [3.0, 1.0, 0.0, 2.0],
                                  [0.0, -4.0, 2.0, 0.0]])
-        torch.testing.assert_close(self.graph.symmetric_quadratic(QUADRATIC), expected)
-        batched = self.graph.symmetric_quadratic(QUADRATIC_2)
+        matrix = self.graph.quadratic_matrix(QUADRATIC)
+        torch.testing.assert_close(matrix, expected)
+        # every edge at both of its positions
+        torch.testing.assert_close(matrix[self.graph.edge_idx_i, self.graph.edge_idx_j], QUADRATIC)
+        torch.testing.assert_close(matrix[self.graph.edge_idx_j, self.graph.edge_idx_i], QUADRATIC)
+        batched = self.graph.quadratic_matrix(QUADRATIC_2)
         self.assertEqual((2, 4, 4), tuple(batched.shape))
         torch.testing.assert_close(batched[1], 2 * expected)
+        with self.assertRaisesRegex(ValueError, "Expected 4 edge biases"):
+            self.graph.quadratic_matrix(torch.zeros(3))
 
     def test_energy(self):
         torch.testing.assert_close(self.graph.energy(SPINS, LINEAR, QUADRATIC), ENERGIES)
@@ -166,9 +160,9 @@ class TestGraphIndex(unittest.TestCase):
             torch.testing.assert_close(fields_unknown, torch.tensor([4.0, 3.0, 4.0, 2.0]))
 
         with self.subTest("A precomputed coupling matrix"):
-            coupling = self.graph.symmetric_quadratic(QUADRATIC)
+            coupling = self.graph.quadratic_matrix(QUADRATIC)
             torch.testing.assert_close(
-                self.graph.effective_field(SPINS, linear=LINEAR, coupling=coupling), fields
+                self.graph.effective_field(SPINS, linear=LINEAR, quadratic_matrix=coupling), fields
             )
 
         with self.subTest("A batch of models with M configurations each"):
@@ -183,19 +177,19 @@ class TestGraphIndex(unittest.TestCase):
 
     def test_effective_field_validation(self):
         spins = SPINS.reshape(2, 2, 4)
-        coupling = self.graph.symmetric_quadratic(QUADRATIC_2)
+        coupling = self.graph.quadratic_matrix(QUADRATIC_2)
         # Broadcasting would silently return (2, 2, 2, 4) fields
         for linear, quadratic in ((LINEAR, QUADRATIC_2), (LINEAR_2, QUADRATIC)):
             with self.assertRaisesRegex(ValueError, "same batch of models"):
                 self.graph.effective_field(spins, linear=linear, quadratic=quadratic)
         with self.assertRaisesRegex(ValueError, "same batch of models"):
-            self.graph.effective_field(spins, linear=LINEAR, coupling=coupling)
+            self.graph.effective_field(spins, linear=LINEAR, quadratic_matrix=coupling)
         with self.assertRaisesRegex(ValueError, "one per node"):
             self.graph.effective_field(spins, linear=torch.zeros(3), quadratic=QUADRATIC)
-        with self.assertRaisesRegex(ValueError, "`quadratic` or `coupling`"):
+        with self.assertRaisesRegex(ValueError, "`quadratic` or `quadratic_matrix`"):
             self.graph.effective_field(spins, linear=LINEAR_2)
         with self.assertRaisesRegex(ValueError, "not both"):
-            self.graph.effective_field(spins, linear=LINEAR_2, quadratic=QUADRATIC_2, coupling=coupling)
+            self.graph.effective_field(spins, linear=LINEAR_2, quadratic=QUADRATIC_2, quadratic_matrix=coupling)
 
     def test_edgeless(self):
         graph = GraphIndex([0, 1], [])

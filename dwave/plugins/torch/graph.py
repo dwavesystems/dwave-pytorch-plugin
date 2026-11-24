@@ -28,9 +28,10 @@ class GraphIndex(torch.nn.Module):
     Nodes are indexed by their position in ``nodes`` and edges by their position in ``edges``.
     Quadratic biases are given *per edge*, as tensors of shape ``(..., n_edges)`` in the order of
     :attr:`edges`. Where a dense matrix product is the efficient computation, as in :meth:`energy`
-    and :meth:`effective_field`, the coupling matrix is built on the fly by :meth:`dense_quadratic`
-    and discarded afterwards, so the per-edge biases are the only representation that is stored,
-    optimized and exchanged. The index tensors are non-persistent buffers: they move with
+    and :meth:`effective_field`, the coupling matrix is built on the fly by
+    :meth:`quadratic_matrix` and discarded afterwards, so the per-edge biases are the
+    only representation that is stored, optimized and exchanged. The index tensors are
+    non-persistent buffers: they move with
     :meth:`~torch.nn.Module.to` but, being derived from ``nodes`` and ``edges``, are not saved
     in :meth:`~torch.nn.Module.state_dict`, which holds parameters only. Modules defined on a
     graph, such as
@@ -76,6 +77,7 @@ class GraphIndex(torch.nn.Module):
         if len(self.node_to_idx) != self.n_nodes:
             raise ValueError("`nodes` contains duplicate entries.")
         try:
+            # Reshaped to two columns, which the tensor of an edgeless graph would lack
             endpoints = torch.tensor(
                 [[self.node_to_idx[u], self.node_to_idx[v]] for u, v in self.edges],
                 dtype=torch.long,
@@ -126,8 +128,10 @@ class GraphIndex(torch.nn.Module):
 
     # ------------------------------------------------------------------ coupling matrices --------
 
-    def dense_quadratic(self, quadratic: torch.Tensor) -> torch.Tensor:
-        """Build the dense coupling matrix :math:`J` of per-edge quadratic biases.
+    def quadratic_matrix(self, quadratic: torch.Tensor) -> torch.Tensor:
+        """The symmetric coupling matrix of per-edge quadratic biases, holding the bias of every
+        edge at both of its positions, so that row ``k`` holds the couplings of node ``k`` to
+        every other node.
 
         This is the single place where a dense matrix is made from the per-edge biases; callers
         build it right before a matrix product and let it go afterwards.
@@ -140,31 +144,17 @@ class GraphIndex(torch.nn.Module):
             ValueError: If the trailing dimension of ``quadratic`` is not the number of edges.
 
         Returns:
-            torch.Tensor: A strictly upper-triangular tensor of shape ``(..., n_nodes, n_nodes)``
-            holding the bias of edge ``k`` at ``[edge_idx_i[k], edge_idx_j[k]]`` and zeros
-            elsewhere.
+            torch.Tensor: A symmetric tensor of shape ``(..., n_nodes, n_nodes)`` with zero
+            diagonal.
         """
         if quadratic.shape[-1] != self.n_edges:
             raise ValueError(
                 f"Expected {self.n_edges} edge biases, got {quadratic.shape[-1]}."
             )
-        coupling = quadratic.new_zeros(*quadratic.shape[:-1], self.n_nodes, self.n_nodes)
-        coupling[..., self.edge_idx_i, self.edge_idx_j] = quadratic
-        return coupling
-
-    def symmetric_quadratic(self, quadratic: torch.Tensor) -> torch.Tensor:
-        """The symmetrized coupling matrix :math:`J + J^T` of per-edge quadratic biases, whose
-        row ``k`` holds the couplings of node ``k`` to every other node.
-
-        Args:
-            quadratic (torch.Tensor): Quadratic biases of the edges, of shape ``(..., n_edges)``.
-
-        Returns:
-            torch.Tensor: A symmetric tensor of shape ``(..., n_nodes, n_nodes)`` with zero
-            diagonal.
-        """
-        coupling = self.dense_quadratic(quadratic)
-        return coupling + coupling.mT
+        matrix = quadratic.new_zeros(*quadratic.shape[:-1], self.n_nodes, self.n_nodes)
+        matrix[..., self.edge_idx_i, self.edge_idx_j] = quadratic
+        matrix[..., self.edge_idx_j, self.edge_idx_i] = quadratic
+        return matrix
 
     # ------------------------------------------------------------------ Ising energies -----------
 
@@ -179,7 +169,7 @@ class GraphIndex(torch.nn.Module):
         biases, of shapes ``(*batch, n_nodes)`` and ``(*batch, n_edges)``, define one model per
         batch element and apply to spins of shape ``(*batch, M, n_nodes)``, i.e. ``M``
         configurations per model, or ``(*batch, n_nodes)``, one configuration per model. The
-        coupling matrices are built on the fly with :meth:`dense_quadratic`.
+        coupling matrices are built on the fly with :meth:`quadratic_matrix`.
 
         Args:
             x (torch.Tensor): Spins.
@@ -195,9 +185,13 @@ class GraphIndex(torch.nn.Module):
             torch.Tensor: Energies of shape ``x.shape[:-1]``.
         """
         self._check_linear(linear, quadratic.shape[:-1])
+        # x: (*batch, M, n_nodes) for batched biases, with the sample dimension inserted when
+        # the spins hold one configuration per model, or (..., n_nodes) for unbatched biases;
+        # matrix: (*batch, n_nodes, n_nodes), symmetric, so that the quadratic form counts every
+        # edge twice and is halved
         x, squeeze = self._align_shapes(x, linear)
-        coupling = self.dense_quadratic(quadratic)
-        energy = (x @ linear.unsqueeze(-1)).squeeze(-1) + ((x @ coupling) * x).sum(-1)
+        matrix = self.quadratic_matrix(quadratic)
+        energy = (x @ linear.unsqueeze(-1)).squeeze(-1) + 0.5 * ((x @ matrix) * x).sum(-1)
         return energy.squeeze(-1) if squeeze else energy
 
     def effective_field(
@@ -207,7 +201,7 @@ class GraphIndex(torch.nn.Module):
         linear: torch.Tensor,
         quadratic: torch.Tensor | None = None,
         idx: torch.Tensor | None = None,
-        coupling: torch.Tensor | None = None,
+        quadratic_matrix: torch.Tensor | None = None,
     ) -> torch.Tensor:
         r"""Effective fields :math:`h_k + \sum_{l} J_{kl} s_l` acting on nodes under given biases.
 
@@ -221,33 +215,35 @@ class GraphIndex(torch.nn.Module):
             x (torch.Tensor): Spins of shape ``(..., n_nodes)``; ``torch.nan`` marks unknown spins.
             linear (torch.Tensor): Linear biases.
             quadratic (torch.Tensor, optional): Quadratic biases of the edges, in the order of
-                :attr:`edges`. Required unless ``coupling`` is given.
+                :attr:`edges`. Required unless ``quadratic_matrix`` is given.
             idx (torch.Tensor, optional): Indices of the nodes whose fields are returned. If
                 ``None``, the fields of all nodes are returned. Defaults to ``None``.
-            coupling (torch.Tensor, optional): The :meth:`symmetric_quadratic` of ``quadratic``,
-                which a caller evaluating the fields of several blocks of nodes can pass to avoid
-                rebuilding it. Defaults to ``None``, i.e. it is built from ``quadratic``.
+            quadratic_matrix (torch.Tensor, optional): The :meth:`quadratic_matrix` of
+                ``quadratic``, given in its place. A caller that evaluates the fields repeatedly
+                for the same biases, such as for several blocks of nodes, should build it once
+                and pass it rather than have it rebuilt on every call. Defaults to ``None``,
+                i.e. it is built from ``quadratic``.
 
         Raises:
-            ValueError: If neither or both of ``quadratic`` and ``coupling`` are given, ``linear``
-                does not hold one bias per node, or the biases are not batched alike.
+            ValueError: If neither or both of ``quadratic`` and ``quadratic_matrix`` are given,
+                ``linear`` does not hold one bias per node, or the biases are not batched alike.
 
         Returns:
             torch.Tensor: Effective fields of shape ``(..., n_nodes)`` or ``(..., len(idx))``.
         """
-        if coupling is None:
+        if quadratic_matrix is None:
             if quadratic is None:
-                raise ValueError("Either `quadratic` or `coupling` is required.")
-            coupling = self.symmetric_quadratic(quadratic)
+                raise ValueError("Either `quadratic` or `quadratic_matrix` is required.")
+            quadratic_matrix = self.quadratic_matrix(quadratic)
         elif quadratic is not None:
-            raise ValueError("Give either `quadratic` or `coupling`, not both.")
-        self._check_linear(linear, coupling.shape[:-2])
+            raise ValueError("Give either `quadratic` or `quadratic_matrix`, not both.")
+        self._check_linear(linear, quadratic_matrix.shape[:-2])
         x, squeeze = self._align_shapes(x, linear)
         spins = torch.nan_to_num(x, nan=0.0)
         fields = linear if linear.ndim == 1 else linear.unsqueeze(-2)
         if idx is not None:
-            fields, coupling = fields[..., idx], coupling[..., :, idx]
-        fields = fields + spins @ coupling
+            fields, quadratic_matrix = fields[..., idx], quadratic_matrix[..., :, idx]
+        fields = fields + spins @ quadratic_matrix
         return fields.squeeze(-2) if squeeze else fields
 
     def _check_linear(self, linear: torch.Tensor, batch_shape: torch.Size) -> None:
@@ -257,7 +253,7 @@ class GraphIndex(torch.nn.Module):
             linear (torch.Tensor): Linear biases, expected to be of shape
                 ``(*batch_shape, n_nodes)``.
             batch_shape (torch.Size): Batch shape of the quadratic biases or of the couplings,
-                i.e. ``quadratic.shape[:-1]`` or ``coupling.shape[:-2]``.
+                i.e. ``quadratic.shape[:-1]`` or ``quadratic_matrix.shape[:-2]``.
 
         Raises:
             ValueError: If ``linear`` does not have shape ``(*batch_shape, n_nodes)``, in

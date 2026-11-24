@@ -5,7 +5,7 @@ features:
     edges of a graph. It validates the graph and provides the
     graph attributes ``nodes``, ``edges``, ``node_to_idx``, ``edge_to_idx``, ``n_nodes`` and
     ``n_edges``, the buffers ``edge_idx_i`` and ``edge_idx_j``, the coupling matrices
-    ``dense_quadratic`` and ``symmetric_quadratic`` of per-edge biases, and the Ising ``energy``
+    ``quadratic_matrix`` of per-edge biases, and the Ising ``energy``
     and ``effective_field`` of spins under explicitly given per-edge biases, for a single model or
     a batch of models on the graph. ``dwave.plugins.torch.graph`` holds the graph core and
     imports nothing but PyTorch, and ``dwave.plugins.torch.utils`` holds the dimod conversions.
