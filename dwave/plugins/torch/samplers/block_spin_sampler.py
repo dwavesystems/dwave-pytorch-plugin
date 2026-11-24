@@ -28,7 +28,6 @@ if TYPE_CHECKING:
 
 from dwave.plugins.torch.samplers.base import TorchSampler
 from dwave.plugins.torch.nn.functional import bit2spin_soft
-from dwave.plugins.torch.tensor import randspin
 
 __all__ = ["BlockSampler"]
 
@@ -153,7 +152,9 @@ class BlockSampler(TorchSampler):
             torch.Tensor: The initial states of the sampler's Markov chain.
         """
         if initial_states is None:
-            initial_states = randspin((num_chains, self._grbm.n_nodes), generator=self._rng)
+            initial_states = 2 * torch.randint(
+                0, 2, (num_chains, self._grbm.n_nodes), generator=self._rng
+            ) - 1
 
         if initial_states.shape != (num_chains, self._grbm.n_nodes):
             raise ValueError(

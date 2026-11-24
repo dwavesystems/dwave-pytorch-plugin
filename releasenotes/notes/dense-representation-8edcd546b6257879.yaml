@@ -1,0 +1,27 @@
+---
+features:
+  - |
+    ``dwave.plugins.torch.graph.GraphIndex`` is a ``torch.nn.Module`` indexing the nodes and
+    edges of a graph. It validates the graph and provides the
+    graph attributes ``nodes``, ``edges``, ``node_to_idx``, ``edge_to_idx``, ``n_nodes`` and
+    ``n_edges``, the buffers ``edge_idx_i`` and ``edge_idx_j``, the coupling matrices
+    ``quadratic_matrix`` of per-edge biases, and the Ising ``energy``
+    and ``effective_field`` of spins under explicitly given per-edge biases, for a single model or
+    a batch of models on the graph. ``dwave.plugins.torch.graph`` holds the graph core and
+    imports nothing but PyTorch, and ``dwave.plugins.torch.utils`` holds the dimod conversions.
+  - |
+    ``dwave.plugins.torch.utils.to_bqm`` converts the biases of an Ising model on a
+    ``GraphIndex`` to a ``dimod.BinaryQuadraticModel`` without intermediate dictionaries, and
+    ``dwave.plugins.torch.utils.sampleset_to_tensor`` repeats aggregated samples according to
+    ``num_occurrences``.
+upgrade:
+  - |
+    ``randspin`` and the ``dwave.plugins.torch.tensor`` module are removed; it was
+    ``2 * torch.randint(0, 2, size) - 1``.
+fixes:
+  - |
+    The ``Ising`` layer ignored ``num_occurrences`` of aggregated sample sets, which a QPU returns
+    by default, so repeated reads counted once in its outputs and gradients, and it failed when
+    the numbers of distinct samples differed between batch elements.
+  - |
+    ``tests/test_samplers`` is now collected by test discovery.
