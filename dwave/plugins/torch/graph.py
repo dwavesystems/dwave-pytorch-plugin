@@ -28,9 +28,10 @@ class GraphIndex(torch.nn.Module):
     Nodes are indexed by their position in ``nodes`` and edges by their position in ``edges``.
     Quadratic biases are given *per edge*, as tensors of shape ``(..., n_edges)`` in the order of
     :attr:`edges`. Where a dense matrix product is the efficient computation, as in :meth:`energy`
-    and :meth:`effective_field`, the coupling matrix is built on the fly by
-    :meth:`quadratic_matrix` and discarded afterwards, so the per-edge biases are the
-    only representation that is stored, optimized and exchanged. The index tensors are
+    and :meth:`effective_field` given a :meth:`quadratic_matrix`, the coupling matrix is built on
+    the fly and discarded afterwards, so the per-edge biases are the only representation that is
+    stored, optimized and exchanged; given per-edge biases, :meth:`effective_field` scatters over
+    the edges instead, which is cheaper on large sparse graphs. The index tensors are
     non-persistent buffers: they move with
     :meth:`~torch.nn.Module.to` but, being derived from ``nodes`` and ``edges``, are not saved
     in :meth:`~torch.nn.Module.state_dict`, which holds parameters only. Modules defined on a
@@ -47,10 +48,11 @@ class GraphIndex(torch.nn.Module):
         ValueError: If ``nodes`` contains duplicates, an edge references an unknown node, an
             edge is a self-loop, or an edge is duplicated (in either orientation).
 
-    The module also evaluates the Ising :meth:`energy` and :meth:`effective_field` of spins
-    under biases that are given explicitly, for a single model or a batch of models on the graph.
-    Subclasses that own parameters, such as the Boltzmann machine, wrap these methods with their
-    own biases.
+    The module also evaluates the Ising :meth:`energy`, :meth:`effective_field` and
+    :meth:`excitation_energies` of spins under biases that are given explicitly, for a single
+    model or a batch of models on the graph, and checks such biases and spins against the graph
+    with :meth:`validate_biases` and :meth:`validate_spins`. Subclasses that own parameters, such
+    as the Boltzmann machine, wrap these methods with their own biases.
 
     Attributes:
         nodes (tuple[Hashable, ...]): The nodes, in index order.
@@ -215,36 +217,144 @@ class GraphIndex(torch.nn.Module):
             x (torch.Tensor): Spins of shape ``(..., n_nodes)``; ``torch.nan`` marks unknown spins.
             linear (torch.Tensor): Linear biases.
             quadratic (torch.Tensor, optional): Quadratic biases of the edges, in the order of
-                :attr:`edges`. Required unless ``quadratic_matrix`` is given.
+                :attr:`edges`, evaluated by two scatters over the edges, which touch every
+                (configuration, edge) pair once. Required unless ``quadratic_matrix`` is given.
             idx (torch.Tensor, optional): Indices of the nodes whose fields are returned. If
                 ``None``, the fields of all nodes are returned. Defaults to ``None``.
-            quadratic_matrix (torch.Tensor, optional): The :meth:`quadratic_matrix` of
-                ``quadratic``, given in its place. A caller that evaluates the fields repeatedly
-                for the same biases, such as for several blocks of nodes, should build it once
-                and pass it rather than have it rebuilt on every call. Defaults to ``None``,
-                i.e. it is built from ``quadratic``.
+            quadratic_matrix (torch.Tensor, optional): The :meth:`quadratic_matrix` of the
+                biases, given in place of ``quadratic`` and evaluated by the dense product, which
+                costs ``n_nodes ** 2`` multiply-adds per configuration and is the cheaper path on
+                all but large sparse graphs. A caller that evaluates the fields repeatedly for the
+                same biases, such as for several blocks of nodes, should build it once and pass
+                it. Defaults to ``None``.
 
         Raises:
             ValueError: If neither or both of ``quadratic`` and ``quadratic_matrix`` are given,
-                ``linear`` does not hold one bias per node, or the biases are not batched alike.
+                ``quadratic`` does not hold one bias per edge, ``linear`` does not hold one bias
+                per node, or the biases are not batched alike.
 
         Returns:
             torch.Tensor: Effective fields of shape ``(..., n_nodes)`` or ``(..., len(idx))``.
         """
-        if quadratic_matrix is None:
+        if quadratic_matrix is not None:
+            if quadratic is not None:
+                raise ValueError("Give either `quadratic` or `quadratic_matrix`, not both.")
+            self._check_linear(linear, quadratic_matrix.shape[:-2])
+        else:
             if quadratic is None:
                 raise ValueError("Either `quadratic` or `quadratic_matrix` is required.")
-            quadratic_matrix = self.quadratic_matrix(quadratic)
-        elif quadratic is not None:
-            raise ValueError("Give either `quadratic` or `quadratic_matrix`, not both.")
-        self._check_linear(linear, quadratic_matrix.shape[:-2])
+            self.validate_biases(linear, quadratic)
+
         x, squeeze = self._align_shapes(x, linear)
-        spins = torch.nan_to_num(x, nan=0.0)
-        fields = linear if linear.ndim == 1 else linear.unsqueeze(-2)
-        if idx is not None:
-            fields, quadratic_matrix = fields[..., idx], quadratic_matrix[..., :, idx]
-        fields = fields + spins @ quadratic_matrix
+        spins = torch.nan_to_num(x, nan=0.0)  # unknown spins contribute nothing
+        fields = _per_model(linear) if idx is None else _per_model(linear)[..., idx]
+        if quadratic_matrix is not None:
+            fields = fields + self._dense_interaction(spins, quadratic_matrix, idx)
+        else:
+            fields = fields + self._scattered_interaction(spins, quadratic, idx)
         return fields.squeeze(-2) if squeeze else fields
+
+    @staticmethod
+    def _dense_interaction(
+        spins: torch.Tensor, quadratic_matrix: torch.Tensor, idx: torch.Tensor | None
+    ) -> torch.Tensor:
+        """The interaction part of the fields of the nodes ``idx`` (all nodes if ``None``) as the
+        product of the spins with the columns of the coupling matrix selected beforehand."""
+        return spins @ (quadratic_matrix if idx is None else quadratic_matrix[..., :, idx])
+
+    def _scattered_interaction(
+        self, spins: torch.Tensor, quadratic: torch.Tensor, idx: torch.Tensor | None
+    ) -> torch.Tensor:
+        """The interaction part of the fields by two scatters over the edges: every edge adds its
+        bias times the spin at one endpoint to the field at the other. The fields of all nodes
+        are computed and those of ``idx`` (all nodes if ``None``) returned."""
+        edge_biases = _per_model(quadratic)
+        fields = torch.zeros_like(spins)
+        for i, j in ((self.edge_idx_i, self.edge_idx_j), (self.edge_idx_j, self.edge_idx_i)):
+            fields = fields.index_add(-1, i, edge_biases * spins[..., j])
+        return fields if idx is None else fields[..., idx]
+
+    def excitation_energies(
+        self,
+        x: torch.Tensor,
+        *,
+        linear: torch.Tensor,
+        quadratic: torch.Tensor | None = None,
+        idx: torch.Tensor | None = None,
+        quadratic_matrix: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        r"""Energies released by flipping single spins,
+        :math:`\epsilon_k(s) = E(s) - E(s^{(k)}) = 2 s_k h^{\text{eff}}_k(s)`, :math:`s^{(k)}`
+        being :math:`s` with spin :math:`k` flipped: positive where the flip would lower the
+        energy, i.e. the spin is excited against its effective field, and negative where the spin
+        is relaxed.
+
+        The arguments are those of :meth:`effective_field` and the energies have the shape of its
+        result; the energy of an unknown spin (``torch.nan``) is ``torch.nan``.
+        """
+        fields = self.effective_field(
+            x,
+            linear=linear,
+            quadratic=quadratic,
+            idx=idx,
+            quadratic_matrix=quadratic_matrix,
+        )
+        return 2.0 * (x if idx is None else x[..., idx]) * fields
+
+    # ------------------------------------------------------------------ validation ---------------
+
+    def validate_biases(self, linear: torch.Tensor, quadratic: torch.Tensor) -> torch.Size:
+        """Check that biases define one model or a batch of models on the graph.
+
+        Args:
+            linear (torch.Tensor): Linear biases of shape ``(*batch, n_nodes)``.
+            quadratic (torch.Tensor): Quadratic biases of the edges of shape ``(*batch, n_edges)``.
+
+        Raises:
+            ValueError: If ``linear`` does not hold one bias per node, ``quadratic`` does not hold
+                one bias per edge, or the two are not batched alike.
+
+        Returns:
+            torch.Size: The batch shape ``(*batch)``, empty for a single model.
+        """
+        if quadratic.ndim < 1 or quadratic.shape[-1] != self.n_edges:
+            raise ValueError(
+                f"Expected {self.n_edges} quadratic biases (one per edge), got shape "
+                f"{tuple(quadratic.shape)}."
+            )
+        self._check_linear(linear, quadratic.shape[:-1])
+        return linear.shape[:-1]
+
+    def validate_spins(
+        self, spins: torch.Tensor, batch_shape: torch.Size | None = None, *, values: bool = True
+    ) -> None:
+        """Check that spins are configurations of the graph, batched like given biases.
+
+        Args:
+            spins (torch.Tensor): Spins expected to have shape ``(..., M, n_nodes)``, ``M``
+                configurations with one column per node.
+            batch_shape (torch.Size, optional): The batch shape of the biases the spins go with,
+                as returned by :meth:`validate_biases`; when it is not empty, the spins must have
+                shape ``(*batch_shape, M, n_nodes)``. Defaults to ``None``, any leading shape.
+            values (bool): Whether to check that every entry is ``±1``. Defaults to ``True``.
+
+        Raises:
+            ValueError: If ``spins`` do not have the expected shape, hold no configuration, or,
+                with ``values``, hold a value other than ``±1``.
+        """
+        if spins.ndim < 2 or spins.shape[-1] != self.n_nodes:
+            raise ValueError(
+                f"spins must have shape (..., M, {self.n_nodes}), got {tuple(spins.shape)}."
+            )
+        if batch_shape and spins.shape[:-2] != batch_shape:
+            raise ValueError(
+                f"spins must have shape {(*batch_shape, 'M', self.n_nodes)}, batched like the "
+                f"biases, got {tuple(spins.shape)}."
+            )
+        if spins.shape[-2] == 0:
+            raise ValueError("At least one sample per model is required, got none.")
+        if values and not bool((spins.abs() == 1).all()):
+            raise ValueError("spins must hold ±1 values only.")
 
     def _check_linear(self, linear: torch.Tensor, batch_shape: torch.Size) -> None:
         """Raise unless ``linear`` holds one bias per node for every model of a batch.
@@ -285,3 +395,10 @@ class GraphIndex(torch.nn.Module):
         if linear.ndim > 1 and x.ndim == linear.ndim:
             return x.unsqueeze(-2), True
         return x, False
+
+
+def _per_model(biases: torch.Tensor) -> torch.Tensor:
+    """Biases of one model as they are; biases of a batch of models with a sample dimension
+    inserted after the batch dimensions, so that they broadcast against spins of shape
+    ``(*batch, M, n)``."""
+    return biases if biases.ndim == 1 else biases.unsqueeze(-2)

@@ -191,6 +191,83 @@ class TestGraphIndex(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "not both"):
             self.graph.effective_field(spins, linear=LINEAR_2, quadratic=QUADRATIC_2, quadratic_matrix=coupling)
 
+    def test_effective_field_scatter(self):
+        # Per-edge biases take the scatters over the edges, which give the fields of the dense
+        # product with the matrix of the biases, with their gradients
+        matrix = self.graph.quadratic_matrix(QUADRATIC)
+        dense = self.graph.effective_field(SPINS, linear=LINEAR, quadratic_matrix=matrix)
+        scattered = self.graph.effective_field(SPINS, linear=LINEAR, quadratic=QUADRATIC)
+        torch.testing.assert_close(scattered, dense)
+        torch.testing.assert_close(scattered[2], FIELDS_THIRD)
+
+        with self.subTest("A batch of models, a subset of nodes and unknown spins"):
+            spins = SPINS[2].expand(2, 3, 4).clone()
+            spins[:, 1, 1] = torch.nan
+            matrix = self.graph.quadratic_matrix(QUADRATIC_2)
+            for kwargs in (dict(), dict(idx=torch.tensor([2, 0]))):
+                torch.testing.assert_close(
+                    self.graph.effective_field(spins, linear=LINEAR_2, quadratic=QUADRATIC_2, **kwargs),
+                    self.graph.effective_field(spins, linear=LINEAR_2, quadratic_matrix=matrix, **kwargs),
+                )
+
+        with self.subTest("The gradients with respect to the biases agree"):
+            grads = []
+            for dense in (True, False):
+                linear, quadratic = LINEAR.clone().requires_grad_(), QUADRATIC.clone().requires_grad_()
+                if dense:
+                    couplings = dict(quadratic_matrix=self.graph.quadratic_matrix(quadratic))
+                else:
+                    couplings = dict(quadratic=quadratic)
+                fields = self.graph.effective_field(SPINS, linear=linear, **couplings)
+                grads.append(torch.autograd.grad((fields * SPINS).sum(), (linear, quadratic)))
+            torch.testing.assert_close(grads[0], grads[1])
+
+        with self.subTest("Per-edge biases are checked"):
+            with self.assertRaisesRegex(ValueError, "one per edge"):
+                self.graph.effective_field(SPINS, linear=LINEAR, quadratic=torch.zeros(3))
+
+    def test_excitation_energies(self):
+        # Twice the spin times its field: 2 * (1, -1, 1, -1) * (4, 3, 3, 6) for the third configuration
+        energies = self.graph.excitation_energies(SPINS[2], linear=LINEAR, quadratic=QUADRATIC)
+        torch.testing.assert_close(energies, torch.tensor([8.0, -6.0, 6.0, -12.0]))
+
+        with self.subTest("The energy released by a flip is the difference of the energies"):
+            for k in range(4):
+                flipped = SPINS[2].clone()
+                flipped[k] = -flipped[k]
+                energy = self.graph.energy(SPINS[2], LINEAR, QUADRATIC)
+                torch.testing.assert_close(energies[k], energy - self.graph.energy(flipped, LINEAR, QUADRATIC))
+
+        with self.subTest("The arguments of effective_field"):
+            batched = self.graph.excitation_energies(
+                SPINS[2].expand(2, 4), linear=LINEAR_2, quadratic=QUADRATIC_2, idx=torch.tensor([3])
+            )
+            torch.testing.assert_close(batched, torch.tensor([[-12.0], [-24.0]]))
+
+    def test_validate_biases(self):
+        self.assertEqual(torch.Size([]), self.graph.validate_biases(LINEAR, QUADRATIC))
+        self.assertEqual(torch.Size([2]), self.graph.validate_biases(LINEAR_2, QUADRATIC_2))
+        with self.assertRaisesRegex(ValueError, "one per node"):
+            self.graph.validate_biases(torch.zeros(3), QUADRATIC)
+        with self.assertRaisesRegex(ValueError, "one per edge"):
+            self.graph.validate_biases(LINEAR, torch.zeros(3))
+        with self.assertRaisesRegex(ValueError, "same batch of models"):
+            self.graph.validate_biases(LINEAR_2, QUADRATIC)
+
+    def test_validate_spins(self):
+        self.graph.validate_spins(SPINS)
+        self.graph.validate_spins(SPINS.reshape(2, 2, 4), torch.Size([2]))
+        self.graph.validate_spins(SPINS.reshape(2, 2, 4), torch.Size([]))  # unbatched biases
+        self.graph.validate_spins(0.5 * SPINS, values=False)
+        with self.assertRaisesRegex(ValueError, r"spins must have shape \(\.\.\., M, 4\)"):
+            self.graph.validate_spins(SPINS[0])
+        with self.assertRaisesRegex(ValueError, "batched like the biases"):
+            self.graph.validate_spins(SPINS.reshape(2, 2, 4), torch.Size([3]))
+        with self.assertRaisesRegex(ValueError, "At least one sample"):
+            self.graph.validate_spins(SPINS[:0])
+        with self.assertRaisesRegex(ValueError, "±1 values"):
+            self.graph.validate_spins(0.5 * SPINS)
+
     def test_edgeless(self):
         graph = GraphIndex([0, 1], [])
         self.assertEqual(0, graph.n_edges)
