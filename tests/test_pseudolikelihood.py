@@ -13,17 +13,20 @@
 # limitations under the License.
 """Tests of maximum pseudolikelihood estimation.
 
-The negative log-pseudolikelihood is checked against the conditional probabilities of single
-spins obtained by enumeration; the temperature fit against dwave-system's estimator, an analytic
-single-spin case and the planted temperature of exactly sampled data; the joint fit against
-dwave-system's general estimator with one binary quadratic model per bias, and against the
-planted biases."""
+Nothing is drawn at random. The negative log-pseudolikelihood is checked against values worked out
+by hand on a fixed model and fixed configurations; the temperature fit against dwave-system's
+estimator on fixed configurations, against an analytic single-spin case and against the planted
+temperature of a deterministic sample; the joint fit against dwave-system's general estimator with
+one binary quadratic model per bias, and against the planted biases of a deterministic sample. The
+deterministic sample of a model holds every configuration as often as its Boltzmann probability
+says, rounded to a count, so its statistics are those of the model up to the rounding."""
 import itertools
 import math
 import unittest
 
 import dimod
 import torch
+import torch.nn.functional as F
 from dwave.system.temperatures import maximum_pseudolikelihood as mpl
 from dwave.system.temperatures import maximum_pseudolikelihood_temperature as mple
 
@@ -36,41 +39,50 @@ from dwave.plugins.torch.pseudolikelihood import (
 )
 from dwave.plugins.torch.pseudolikelihood import negative_log_pseudolikelihood as nlpl
 from dwave.plugins.torch.utils import to_bqm
-from tests.helper_functions import randspins
 
-# A triangle with a dangling node, in the deliberately scrambled node order of the model tests
+# The triangle a, b, c with the dangling node d in the node order "dbac" (d=0, b=1, a=2, c=3), the
+# fixture of the graph tests, with the same biases and configurations
 GRAPH = GraphIndex("dbac", [("a", "b"), ("a", "c"), ("a", "d"), ("b", "c")])
 STATES = torch.tensor(list(itertools.product([-1.0, 1.0], repeat=4)), dtype=torch.float64)
+LINEAR = torch.tensor([1.0, -2.0, 3.0, 0.0], dtype=torch.float64)  # h_d, h_b, h_a, h_c
+QUADRATIC = torch.tensor([1.0, 2.0, 3.0, -4.0], dtype=torch.float64)  # J_ab, J_ac, J_ad, J_bc
+SPINS = torch.tensor([[1.0, 1.0, 1.0, 1.0],
+                      [-1.0, -1.0, -1.0, -1.0],
+                      [1.0, -1.0, 1.0, -1.0],
+                      [1.0, 1.0, -1.0, -1.0]], dtype=torch.float64)
+# The excitation energies 2 s_k theta_k of the four configurations, theta_k = h_k + sum_l J_kl s_l
+# being the effective fields (4, -5, 9, -2), (-2, 1, -3, 2), (4, 3, 3, 6) and (-2, 1, 5, -6)
+EXCITATIONS = torch.tensor([[8.0, -10.0, 18.0, -4.0],
+                            [4.0, -2.0, 6.0, -4.0],
+                            [8.0, -6.0, 6.0, -12.0],
+                            [-4.0, 2.0, -10.0, 12.0]], dtype=torch.float64)
+# The negative log-pseudolikelihood of a configuration is the sum over its spins of the softplus
+# of their excitation energies
+NLPL = F.softplus(EXCITATIONS).sum(-1)
+# A second model with the biases negated and the couplings doubled, and the excitation energies
+# of the third and the fourth configuration under it
+LINEAR_2 = torch.stack([LINEAR, -LINEAR])
+QUADRATIC_2 = torch.stack([QUADRATIC, 2 * QUADRATIC])
+EXCITATIONS_2 = torch.tensor([[10.0, -24.0, -6.0, -24.0],
+                              [-14.0, 16.0, -2.0, 24.0]], dtype=torch.float64)
+NLPL_2 = F.softplus(EXCITATIONS_2).sum(-1)
+# Milder planted biases for the fits, whose Boltzmann distribution spreads over every
+# configuration, with the energies of the 16 configurations in the order of STATES, all spins
+# down first: for that one, -(0.25 - 0.5 + 0.75) + (0.5 - 0.25 + 0.75 - 1) = -0.5
+PLANTED_LINEAR = torch.tensor([0.25, -0.5, 0.75, 0.0], dtype=torch.float64)
+PLANTED_QUADRATIC = torch.tensor([0.5, -0.25, 0.75, -1.0], dtype=torch.float64)
+PLANTED_ENERGIES = torch.tensor([-0.5, 2.0, -1.0, 0.5, -0.5, -2.0, 1.0, -1.5,
+                                 -1.5, 1.0, 1.0, 2.5, -1.5, -3.0, 3.0, 0.5], dtype=torch.float64)
+# Twelve configurations, with repeats, standing in for a sample in comparisons with dwave-system
+SAMPLE = STATES[[0, 3, 5, 5, 6, 9, 10, 12, 15, 15, 1, 7]]
 SINGLE = GraphIndex([0], [])  # one spin, no edges
 
 
-def random_biases(graph: GraphIndex, scale: float = 0.5, seed: int = 0):
-    generator = torch.Generator().manual_seed(seed)
-    linear = scale * torch.randn(graph.n_nodes, generator=generator, dtype=torch.float64)
-    quadratic = scale * torch.randn(graph.n_edges, generator=generator, dtype=torch.float64)
-    return linear, quadratic
-
-
-def boltzmann_samples(linear, quadratic, num_samples: int, beta: float = 1.0, seed: int = 0):
-    """Exact samples of the model on ``GRAPH``, by enumeration of its 16 configurations."""
-    probabilities = torch.softmax(-beta * GRAPH.energy(STATES, linear, quadratic), 0)
-    generator = torch.Generator().manual_seed(seed)
-    rows = torch.multinomial(probabilities, num_samples, replacement=True, generator=generator)
-    return STATES[rows]
-
-
-def enumerated_nlpl(graph, linear, quadratic, spins):
-    """The negative log-pseudolikelihood of configurations from the conditional probability of
-    each spin: the Boltzmann weight of the configuration, normalized against the configuration
-    with that spin flipped."""
-    energies = graph.energy(spins, linear, quadratic)
-    total = torch.zeros_like(energies)
-    for k in range(graph.n_nodes):
-        flipped = spins.clone()
-        flipped[..., k] = -flipped[..., k]
-        flipped_energies = graph.energy(flipped, linear, quadratic)
-        total = total - (-energies - torch.logaddexp(-energies, -flipped_energies))
-    return total
+def planted_sample(num_samples: int, beta: float = 1.0) -> torch.Tensor:
+    """The sample of the planted model at inverse temperature ``beta`` in which every configuration
+    appears as often as its Boltzmann probability says, rounded to a count."""
+    probabilities = torch.softmax(-beta * PLANTED_ENERGIES, 0)
+    return STATES.repeat_interleave(torch.round(probabilities * num_samples).long(), 0)
 
 
 def ocean_biases(graph, spins):
@@ -93,83 +105,72 @@ def ocean_beta(graph, linear, quadratic, spins) -> float:
 
 
 class TestNegativeLogPseudolikelihood(unittest.TestCase):
-    def test_matches_enumerated_conditionals(self):
-        linear, quadratic = random_biases(GRAPH, seed=1)
-        spins = randspins(7, 4, seed=2).double()
-        expected = enumerated_nlpl(GRAPH, linear, quadratic, spins)
-        torch.testing.assert_close(nlpl(GRAPH, linear, quadratic, spins, reduction="none"), expected)
-        torch.testing.assert_close(nlpl(GRAPH, linear, quadratic, spins), expected.mean())
-        torch.testing.assert_close(nlpl(GRAPH, linear, quadratic, spins, reduction="sum"), expected.sum())
+    def test_hand_worked_values(self):
+        torch.testing.assert_close(nlpl(GRAPH, LINEAR, QUADRATIC, SPINS, reduction="none"), NLPL)
+        torch.testing.assert_close(nlpl(GRAPH, LINEAR, QUADRATIC, SPINS), NLPL.mean())
+        torch.testing.assert_close(nlpl(GRAPH, LINEAR, QUADRATIC, SPINS, reduction="sum"), NLPL.sum())
         with self.subTest("The value is in the dtype of the biases, whatever the spins' dtype"):
-            value = nlpl(GRAPH, linear.float(), quadratic.float(), spins.long())
+            value = nlpl(GRAPH, LINEAR.float(), QUADRATIC.float(), SPINS.long())
             self.assertEqual(torch.float32, value.dtype)
-            torch.testing.assert_close(value, expected.mean().float())
+            torch.testing.assert_close(value, NLPL.mean().float())
 
     def test_batched_models(self):
-        linear = torch.stack([random_biases(GRAPH, seed=s)[0] for s in (1, 2)])
-        quadratic = torch.stack([random_biases(GRAPH, seed=s)[1] for s in (1, 2)])
-        spins = randspins(2, 5, 4, seed=3).double()
-        values = nlpl(GRAPH, linear, quadratic, spins, reduction="none")
-        self.assertEqual((2, 5), tuple(values.shape))
-        for b in range(2):
-            expected = enumerated_nlpl(GRAPH, linear[b], quadratic[b], spins[b])
-            torch.testing.assert_close(values[b], expected)
-        self.assertEqual((2,), tuple(nlpl(GRAPH, linear, quadratic, spins).shape))
+        # The first two configurations under the first model, the last two under the second
+        spins = torch.stack([SPINS[:2], SPINS[2:]])
+        values = nlpl(GRAPH, LINEAR_2, QUADRATIC_2, spins, reduction="none")
+        torch.testing.assert_close(values, torch.stack([NLPL[:2], NLPL_2]))
+        means = nlpl(GRAPH, LINEAR_2, QUADRATIC_2, spins)
+        torch.testing.assert_close(means, torch.stack([NLPL[:2].mean(), NLPL_2.mean()]))
         with self.subTest("Unbatched biases apply to every leading index of the spins"):
-            values = nlpl(GRAPH, linear[0], quadratic[0], spins)
-            self.assertEqual((2,), tuple(values.shape))
-            expected = enumerated_nlpl(GRAPH, linear[0], quadratic[0], spins[1]).mean()
-            torch.testing.assert_close(values[1], expected)
+            values = nlpl(GRAPH, LINEAR, QUADRATIC, SPINS.reshape(2, 2, 4))
+            torch.testing.assert_close(values, NLPL.reshape(2, 2).mean(-1))
 
     def test_gradients(self):
         # The objective is differentiable in the biases on both evaluation paths
-        linear, quadratic = random_biases(GRAPH, seed=4)
-        spins = randspins(6, 4, seed=5).double()
         for dense in (True, False):
             with self.subTest(dense=dense):
-                biases = linear.clone().requires_grad_(), quadratic.clone().requires_grad_()
+                biases = LINEAR.clone().requires_grad_(), QUADRATIC.clone().requires_grad_()
                 self.assertTrue(torch.autograd.gradcheck(
-                    lambda h, J: nlpl(GRAPH, h, J, spins, dense=dense), biases
+                    lambda h, J: nlpl(GRAPH, h, J, SPINS, dense=dense), biases
                 ))
-        with self.subTest("The scatter path agrees with the dense path, batched too"):
-            batched = torch.stack([linear, 2 * linear]), torch.stack([quadratic, -quadratic])
-            batched_spins = randspins(2, 3, 4, seed=6).double()
-            expected = nlpl(GRAPH, *batched, batched_spins, reduction="none", dense=True)
-            torch.testing.assert_close(
-                nlpl(GRAPH, *batched, batched_spins, reduction="none", dense=False), expected
-            )
+        with self.subTest("The scatter path gives the hand-worked values, batched too"):
+            spins = torch.stack([SPINS[:2], SPINS[2:]])
+            values = nlpl(GRAPH, LINEAR_2, QUADRATIC_2, spins, reduction="none", dense=False)
+            torch.testing.assert_close(values, torch.stack([NLPL[:2], NLPL_2]))
 
     def test_validation(self):
-        linear, quadratic = random_biases(GRAPH)
-        spins = randspins(3, 4).double()
+        spins = SPINS[:3]
         with self.assertRaisesRegex(ValueError, "reduction"):
-            nlpl(GRAPH, linear, quadratic, spins, reduction="max")
+            nlpl(GRAPH, LINEAR, QUADRATIC, spins, reduction="max")
         with self.assertRaisesRegex(ValueError, "one per node"):
-            nlpl(GRAPH, linear[:3], quadratic, spins)
+            nlpl(GRAPH, LINEAR[:3], QUADRATIC, spins)
         with self.assertRaisesRegex(ValueError, "one per edge"):
-            nlpl(GRAPH, linear, quadratic[:3], spins)
+            nlpl(GRAPH, LINEAR, QUADRATIC[:3], spins)
         with self.assertRaisesRegex(ValueError, "same batch of models"):
-            nlpl(GRAPH, linear.expand(2, 4), quadratic, spins)
+            nlpl(GRAPH, LINEAR_2, QUADRATIC, spins)
         with self.assertRaisesRegex(ValueError, r"spins must have shape \(\.\.\., M, 4\)"):
-            nlpl(GRAPH, linear, quadratic, spins[:, :3])
+            nlpl(GRAPH, LINEAR, QUADRATIC, spins[:, :3])
         with self.assertRaisesRegex(ValueError, r"spins must have shape \(\.\.\., M, 4\)"):
-            nlpl(GRAPH, linear, quadratic, spins[0])
+            nlpl(GRAPH, LINEAR, QUADRATIC, spins[0])
         with self.assertRaisesRegex(ValueError, "batched like the biases"):
-            nlpl(GRAPH, linear.expand(2, 4), quadratic.expand(2, 4), randspins(3, 5, 4).double())
+            nlpl(GRAPH, LINEAR_2, QUADRATIC_2, SPINS.expand(3, 4, 4))
         with self.assertRaisesRegex(ValueError, "At least one sample"):
-            nlpl(GRAPH, linear, quadratic, spins[:0])
+            nlpl(GRAPH, LINEAR, QUADRATIC, spins[:0])
         with self.assertRaisesRegex(ValueError, "±1 values"):
-            nlpl(GRAPH, linear, quadratic, spins * 0.5)
+            nlpl(GRAPH, LINEAR, QUADRATIC, spins * 0.5)
         with self.assertRaisesRegex(ValueError, "±1 values"):
-            nlpl(GRAPH, linear, quadratic, spins.clone().fill_(torch.nan))
+            nlpl(GRAPH, LINEAR, QUADRATIC, spins.clone().fill_(torch.nan))
 
 
 class TestFitInverseTemperature(unittest.TestCase):
     def test_matches_dwave_system(self):
-        for seed in range(3):
-            with self.subTest(seed=seed):
-                linear, quadratic = random_biases(GRAPH, seed=seed)
-                spins = randspins(50, 4, seed=10 + seed).double()
+        cases = {
+            "The fixture": (LINEAR, QUADRATIC, SAMPLE),
+            "The planted model": (PLANTED_LINEAR, PLANTED_QUADRATIC, SAMPLE),
+            "The second model": (-LINEAR, 2 * QUADRATIC, SAMPLE[:7]),
+        }
+        for name, (linear, quadratic, spins) in cases.items():
+            with self.subTest(name):
                 fit = fit_inverse_temperature(GRAPH, linear, quadratic, spins)
                 self.assertIsInstance(fit, InverseTemperatureFit)
                 self.assertEqual((), tuple(fit.beta.shape))
@@ -179,7 +180,8 @@ class TestFitInverseTemperature(unittest.TestCase):
                 self.assertAlmostEqual(expected, float(fit.beta), places=10)
                 self.assertTrue(0 < float(fit.beta_stderr) < math.inf)
         with self.subTest("float32 biases and integer spins give the same estimate"):
-            fit32 = fit_inverse_temperature(GRAPH, linear.float(), quadratic.float(), spins.long())
+            fit = fit_inverse_temperature(GRAPH, LINEAR, QUADRATIC, SAMPLE)
+            fit32 = fit_inverse_temperature(GRAPH, LINEAR.float(), QUADRATIC.float(), SAMPLE.long())
             self.assertEqual(torch.float64, fit32.beta.dtype)
             torch.testing.assert_close(fit32.beta, fit.beta, rtol=1e-5, atol=1e-6)
 
@@ -195,17 +197,20 @@ class TestFitInverseTemperature(unittest.TestCase):
         self.assertTrue(bool(fit.converged))
 
     def test_recovers_planted_temperature(self):
-        linear, quadratic = random_biases(GRAPH, scale=0.6, seed=7)
-        spins = boltzmann_samples(linear, quadratic, 20000, beta=1.7, seed=8)
-        fit = fit_inverse_temperature(GRAPH, linear, quadratic, spins)
-        self.assertLess(float(fit.beta_stderr), 0.1)
-        self.assertLess(abs(float(fit.beta) - 1.7), 4 * float(fit.beta_stderr))
+        # The deterministic sample at inverse temperature 1.7 is at 1.7 up to the rounding of its
+        # counts; the standard error says what a random sample of that size would add
+        cold = planted_sample(20000, beta=1.7)
+        fit = fit_inverse_temperature(GRAPH, PLANTED_LINEAR, PLANTED_QUADRATIC, cold)
+        torch.testing.assert_close(fit.beta, torch.tensor(1.7, dtype=torch.float64), rtol=0, atol=1e-3)
+        self.assertLess(float(fit.beta_stderr), 0.05)
+        with self.subTest("The sample at unit inverse temperature"):
+            fit = fit_inverse_temperature(GRAPH, PLANTED_LINEAR, PLANTED_QUADRATIC, planted_sample(20000))
+            torch.testing.assert_close(fit.beta, torch.tensor(1.0, dtype=torch.float64), rtol=0, atol=1e-3)
 
     def test_batched_models(self):
-        biases = [random_biases(GRAPH, seed=s) for s in (1, 2, 3)]
-        linear = torch.stack([h for h, _ in biases])
-        quadratic = torch.stack([J for _, J in biases])
-        spins = randspins(3, 40, 4, seed=9).double()
+        linear = torch.stack([LINEAR, -LINEAR, PLANTED_LINEAR])
+        quadratic = torch.stack([QUADRATIC, 2 * QUADRATIC, PLANTED_QUADRATIC])
+        spins = torch.stack([SAMPLE, -SAMPLE, SAMPLE.flip(0)])
         fit = fit_inverse_temperature(GRAPH, linear, quadratic, spins)
         for field in (fit.beta, fit.beta_stderr, fit.converged):
             self.assertEqual((3,), tuple(field.shape))
@@ -218,9 +223,9 @@ class TestFitInverseTemperature(unittest.TestCase):
             fit = fit_inverse_temperature(GRAPH, linear[:, None], quadratic[:, None], spins[:, None])
             self.assertEqual((3, 1), tuple(fit.beta.shape))
         with self.subTest("Unbatched biases give one estimate per leading index of the spins"):
-            fit = fit_inverse_temperature(GRAPH, linear[0], quadratic[0], spins)
+            fit = fit_inverse_temperature(GRAPH, LINEAR, QUADRATIC, spins)
             self.assertEqual((3,), tuple(fit.beta.shape))
-            single = fit_inverse_temperature(GRAPH, linear[0], quadratic[0], spins[2])
+            single = fit_inverse_temperature(GRAPH, LINEAR, QUADRATIC, spins[2])
             torch.testing.assert_close(fit.beta[2], single.beta)
 
     def test_limits(self):
@@ -247,36 +252,33 @@ class TestFitInverseTemperature(unittest.TestCase):
             self.assertEqual([True, True], fit.converged.tolist())
 
     def test_options(self):
-        linear, quadratic = random_biases(GRAPH, seed=11)
-        spins = randspins(30, 4, seed=12).double()
-        fit = fit_inverse_temperature(GRAPH, linear, quadratic, spins)
+        fit = fit_inverse_temperature(GRAPH, LINEAR, QUADRATIC, SAMPLE)
         with self.subTest("Chunking does not change the estimate"):
             for sample_chunk in (7, None):
-                chunked = fit_inverse_temperature(GRAPH, linear, quadratic, spins, sample_chunk=sample_chunk)
+                chunked = fit_inverse_temperature(GRAPH, LINEAR, QUADRATIC, SAMPLE, sample_chunk=sample_chunk)
                 torch.testing.assert_close(chunked.beta, fit.beta)
                 torch.testing.assert_close(chunked.beta_stderr, fit.beta_stderr)
         with self.subTest("The scatter path gives the same estimate"):
-            scattered = fit_inverse_temperature(GRAPH, linear, quadratic, spins, dense=False)
+            scattered = fit_inverse_temperature(GRAPH, LINEAR, QUADRATIC, SAMPLE, dense=False)
             torch.testing.assert_close(scattered.beta, fit.beta)
             torch.testing.assert_close(scattered.beta_stderr, fit.beta_stderr)
         with self.subTest("A single Newton step is the moment estimate, and is not converged"):
-            energies = 2 * spins * GRAPH.effective_field(spins, linear=linear, quadratic=quadratic)
-            moment = -2 * energies.sum() / energies.square().sum()
-            one_step = fit_inverse_temperature(GRAPH, linear, quadratic, spins, max_iter=1)
+            # From zero, the first step is -2 sum(eps) / sum(eps ** 2) over the excitation energies
+            moment = -2 * EXCITATIONS.sum() / EXCITATIONS.square().sum()
+            one_step = fit_inverse_temperature(GRAPH, LINEAR, QUADRATIC, SPINS, max_iter=1)
             torch.testing.assert_close(one_step.beta, moment)
             self.assertFalse(bool(one_step.converged))
         with self.subTest("A single configuration has no standard error"):
-            single = fit_inverse_temperature(GRAPH, linear, quadratic, spins[:1])
+            single = fit_inverse_temperature(GRAPH, LINEAR, QUADRATIC, SPINS[:1])
             self.assertTrue(math.isnan(float(single.beta_stderr)))
         for kwargs in (dict(max_iter=0), dict(tolerance=0.0), dict(tolerance=math.inf), dict(sample_chunk=0)):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
-                fit_inverse_temperature(GRAPH, linear, quadratic, spins, **kwargs)
+                fit_inverse_temperature(GRAPH, LINEAR, QUADRATIC, SAMPLE, **kwargs)
 
 
 class TestFitPseudolikelihood(unittest.TestCase):
     def setUp(self):
-        self.linear, self.quadratic = random_biases(GRAPH, scale=0.5, seed=20)
-        self.spins = boltzmann_samples(self.linear, self.quadratic, 3000, seed=21)
+        self.spins = planted_sample(2000)
 
     def test_matches_dwave_system(self):
         fit = fit_pseudolikelihood(GRAPH, self.spins)
@@ -302,17 +304,20 @@ class TestFitPseudolikelihood(unittest.TestCase):
             self.assertAlmostEqual(1.0, float(own.beta), places=7)
 
     def test_recovers_planted_biases(self):
-        spins = boltzmann_samples(self.linear, self.quadratic, 50000, seed=22)
-        fit = fit_pseudolikelihood(GRAPH, spins)
-        torch.testing.assert_close(fit.linear, self.linear, rtol=0, atol=0.05)
-        torch.testing.assert_close(fit.quadratic, self.quadratic, rtol=0, atol=0.05)
-        with self.subTest("Data drawn at inverse temperature 2 are at inverse temperature 2 under "
-                          "the planted biases, and at 1 under their own joint fit"):
-            cold = boltzmann_samples(self.linear, self.quadratic, 50000, beta=2.0, seed=23)
-            against_truth = fit_inverse_temperature(GRAPH, self.linear, self.quadratic, cold)
-            self.assertLess(abs(float(against_truth.beta) - 2.0), 4 * float(against_truth.beta_stderr))
+        # The deterministic sample of 20000 is the planted model up to the rounding of its counts
+        fit = fit_pseudolikelihood(GRAPH, planted_sample(20000))
+        torch.testing.assert_close(fit.linear, PLANTED_LINEAR, rtol=0, atol=2e-3)
+        torch.testing.assert_close(fit.quadratic, PLANTED_QUADRATIC, rtol=0, atol=2e-3)
+        with self.subTest("Data at inverse temperature 2 are fitted by twice the biases, are at "
+                          "inverse temperature 2 under the planted ones and at 1 under the fit"):
+            cold = planted_sample(20000, beta=2.0)
             fit = fit_pseudolikelihood(GRAPH, cold)
-            self.assertTrue(fit.converged)
+            torch.testing.assert_close(fit.linear, 2 * PLANTED_LINEAR, rtol=0, atol=1e-2)
+            torch.testing.assert_close(fit.quadratic, 2 * PLANTED_QUADRATIC, rtol=0, atol=1e-2)
+            against_planted = fit_inverse_temperature(GRAPH, PLANTED_LINEAR, PLANTED_QUADRATIC, cold)
+            torch.testing.assert_close(
+                against_planted.beta, torch.tensor(2.0, dtype=torch.float64), rtol=0, atol=1e-3
+            )
             own = fit_inverse_temperature(GRAPH, fit.linear, fit.quadratic, cold)
             self.assertAlmostEqual(1.0, float(own.beta), places=6)
 
