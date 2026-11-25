@@ -14,7 +14,22 @@
 from inspect import signature
 
 import torch
+from dimod import BinaryQuadraticModel
 
+from dwave.plugins.torch.models.boltzmann_machine import GraphRestrictedBoltzmannMachine as GRBM
+from dwave.plugins.torch.utils import to_bqm
+
+
+def set_weights(bm: GRBM, linear, quadratic) -> None:
+    """Set the linear biases and the per-edge quadratic biases (in edge order) of a model."""
+    with torch.no_grad():
+        bm.linear.copy_(torch.as_tensor(linear, dtype=bm.linear.dtype))
+        bm.quadratic.copy_(torch.as_tensor(quadratic, dtype=bm.quadratic.dtype))
+
+
+def model_to_bqm(bm: GRBM) -> BinaryQuadraticModel:
+    """The model as a dimod binary quadratic model."""
+    return to_bqm(bm, bm.linear, bm.quadratic)
 
 
 def randspins(*shape, seed: int = 0) -> torch.Tensor:

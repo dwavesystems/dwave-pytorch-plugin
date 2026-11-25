@@ -27,3 +27,10 @@ features:
     ``GraphIndex.excitation_energies`` are the energies released by single spin flips, twice the
     spin times its effective field, and ``GraphIndex.validate_biases`` and ``validate_spins`` are
     the checks of biases and spins against a graph that the package shares.
+    ``GraphRestrictedBoltzmannMachine.fit_pseudolikelihood(spins, ...)``
+    fits a fully visible model in place. See ``examples/pseudolikelihood.py``.
+upgrade:
+  - |
+    ``GraphRestrictedBoltzmannMachine.estimate_beta`` is computed by ``fit_inverse_temperature``
+    and no longer calls ``dwave.system.temperatures``; the estimate is the same, computed in
+    float64 on the model's device.

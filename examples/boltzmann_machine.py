@@ -12,10 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import torch
-from dwave_networkx import zephyr_coordinates, zephyr_four_color, zephyr_graph
+from dwave.graphs import zephyr_coordinates, zephyr_four_color, zephyr_graph
 from torch.optim import SGD
 
-from dwave.plugins.torch.models.boltzmann_machine import GraphRestrictedBoltzmannMachine as GRBM
+from dwave.plugins.torch.models import GraphRestrictedBoltzmannMachine as GRBM
+from dwave.plugins.torch.samplers import DimodSampler
 from dwave.samplers import SimulatedAnnealingSampler
 from dwave.system import DWaveSampler
 
@@ -32,9 +33,9 @@ def run(use_qpu: bool, num_reads: int, batch_size: int, n_iterations: int, fully
         fully_visible (bool): Flag indicating whether the model should be fully visible.
     """
     if use_qpu:
-        sampler = DWaveSampler(solver="Advantage2_system1.3")
-        zephyr_grid_size = sampler.properties['topology']['shape'][0]
-        G = sampler.to_networkx_graph()
+        dimod_sampler = DWaveSampler(solver="Advantage2_system1.3")
+        zephyr_grid_size = dimod_sampler.properties['topology']['shape'][0]
+        G = dimod_sampler.to_networkx_graph()
         sample_kwargs = dict(
             num_reads=num_reads,
             # Set `answer_mode` to "raw" so no samples are aggregated
@@ -43,14 +44,14 @@ def run(use_qpu: bool, num_reads: int, batch_size: int, n_iterations: int, fully
             # distribution
             auto_scale=False,
         )
-        h_range = sampler.properties["h_range"]
-        j_range = sampler.properties["j_range"]
+        h_range = dimod_sampler.properties["h_range"]
+        j_range = dimod_sampler.properties["j_range"]
         # A ball-park estimate used later to scale the Hamiltonian for the QPU such that it is
         # effectively sampling at, approximately, an effective inverse temperature of one.
         prefactor = 1.0/6.35
     else:
         # Use an MCMC sampler that can sample from the equilibrium distribution
-        sampler = SimulatedAnnealingSampler()
+        dimod_sampler = SimulatedAnnealingSampler()
         # Parameters chosen to reflect a valid MCMC sampler (despite the name "simulated annealing")
         sample_kwargs = dict(
             num_reads=num_reads,
@@ -68,33 +69,31 @@ def run(use_qpu: bool, num_reads: int, batch_size: int, n_iterations: int, fully
     if fully_visible:
         hidden_nodes = None
         n_vis = G.number_of_nodes()
-        kind = None
     else:
         # Use a four-colouring of the Zephyr graph to determine a set of conditionally-independent
-        # nodes to define as hidden units.
+        # nodes to define as hidden units. Because hidden units are then not connected to each
+        # other, their conditional expectations given the data are exact.
         linear_to_zephyr = zephyr_coordinates(zephyr_grid_size).linear_to_zephyr
         qubit_colour = {g: zephyr_four_color(linear_to_zephyr(g)) for g in G}
         hidden_nodes = [q for q, c in qubit_colour.items() if c == 0]
-        n_hid = len(hidden_nodes)
-        n_vis = G.number_of_nodes() - n_hid
-        kind = "sampling"
+        n_vis = G.number_of_nodes() - len(hidden_nodes)
 
-    # Generate fake data to fit the Boltzmann machine to
-    # Make sure ``x`` is of type float
+    # Generate fake data to fit the Boltzmann machine to (one column per visible unit)
     X = 1 - 2.0 * torch.randint(0, 2, (n_iterations, batch_size, n_vis))
 
-    # Instantiate the model
+    # Instantiate the model and wrap the dimod sampler; the wrapper scales and clips the
+    # Hamiltonian prior to sampling and converts sample sets to tensors.
     grbm = GRBM(G.nodes, G.edges, hidden_nodes)
+    sampler = DimodSampler(grbm, dimod_sampler, prefactor=prefactor, linear_range=h_range,
+                           quadratic_range=j_range, sample_kwargs=sample_kwargs)
 
     # Instantiate the optimizer
     opt_grbm = SGD(grbm.parameters(), 0.1)
 
     # Example of one iteration in a training loop
-    # Generate a sample set from the model
     for iteration, x in enumerate(X):
         # Sample from the model
-        s = grbm.sample(sampler, prefactor=prefactor, linear_range=h_range,
-                        quadratic_range=j_range, sample_params=sample_kwargs)
+        s = sampler.sample()
 
         # Measure the effective inverse temperature
         measured_beta = grbm.estimate_beta(s)
@@ -102,12 +101,13 @@ def run(use_qpu: bool, num_reads: int, batch_size: int, n_iterations: int, fully
         # Reset the gradients of the model weights
         opt_grbm.zero_grad()
 
+        # Positive phase: the objective takes complete spin configurations, so fill in the hidden
+        # units (if any) with their exact conditional expectations given the data
+        s_data = x if fully_visible else grbm.conditional_expectation(grbm.pad_visible(x))
+
         # Compute a quasi-objective---this quasi-objective yields the same gradient as the negative
         # log likelihood of the model
-        quasi = grbm.quasi_objective(
-            x, s, kind=kind, sampler=sampler, sample_kwargs=sample_kwargs,
-            prefactor=prefactor, linear_range=h_range, quadratic_range=j_range
-        )
+        quasi = grbm.quasi_objective(s_data, s)
 
         # Backpropagate gradients
         quasi.backward()
@@ -116,7 +116,8 @@ def run(use_qpu: bool, num_reads: int, batch_size: int, n_iterations: int, fully
         opt_grbm.step()
 
         # Compute the average (absolute) gradient to monitor convergence
-        avg_grad = (grbm._linear.grad.abs().mean() + grbm._quadratic.grad.abs().mean())/2
+        avg_grad = (grbm.linear.grad.abs().mean()
+                    + grbm.quadratic.grad.abs().mean()) / 2
 
         print(
             f"Iteration: {iteration}, Average |gradient|: {avg_grad.item():.2f}, Effective inverse temperature: {measured_beta:.4f}"

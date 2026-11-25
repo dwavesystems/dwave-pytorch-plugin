@@ -1,8 +1,26 @@
 ---
+prelude: >
+    Graph-restricted Boltzmann machines now store one quadratic bias per edge and build the
+    dense coupling matrix on the fly wherever a matrix product is the efficient computation:
+    energies and effective fields are dense matrix products, while parameters, gradients and
+    optimizer state have one entry per node and per edge. This release is not backward
+    compatible; see the upgrade notes.
 features:
   - |
-    ``dwave.plugins.torch.graph.GraphIndex`` is a ``torch.nn.Module`` indexing the nodes and
-    edges of a graph. It validates the graph and provides the
+    ``GraphRestrictedBoltzmannMachine.quadratic`` is a per-edge ``(n_edges,)`` parameter in the
+    order of ``edges``. New methods ``effective_field``, ``sufficient_statistics``,
+    ``conditional_expectation`` and ``pad_visible``; new attributes ``visible_nodes``,
+    ``n_visible``, ``n_hidden`` and ``connected_hidden``. All methods accept arbitrary leading
+    batch dimensions.
+  - |
+    ``quasi_objective`` takes complete spin configurations of data and model. For models with
+    hidden units, ``conditional_expectation`` fills in the exact conditional expectations of the
+    hidden units (or of any set of pairwise non-adjacent unknown spins), and any sampler fills in
+    samples drawn conditioned on the data (``sampler.sample(model.pad_visible(x))``). Both keep
+    the objective differentiable with respect to the observations.
+  - |
+    ``dwave.plugins.torch.graph.GraphIndex`` is the ``torch.nn.Module`` base class of
+    ``GraphRestrictedBoltzmannMachine``. It validates the graph and provides the
     graph attributes ``nodes``, ``edges``, ``node_to_idx``, ``edge_to_idx``, ``n_nodes`` and
     ``n_edges``, the buffers ``edge_idx_i`` and ``edge_idx_j``, the coupling matrices
     ``quadratic_matrix`` of per-edge biases, and the Ising ``energy``
@@ -16,9 +34,50 @@ features:
     ``num_occurrences``.
 upgrade:
   - |
+    ``GraphRestrictedBoltzmannMachine.quadratic`` has shape ``(n_edges,)`` and holds the bias of
+    every edge in the order of ``edges``, irrespective of the orientation given at construction.
+    ``sufficient_statistics`` returns batch-averaged statistics in the layout of the parameters
+    instead of per-sample statistics.
+    ``theta``, ``interactions``, ``to_ising`` (use ``dwave.plugins.torch.utils.to_bqm``, and
+    ``bqm.to_ising()`` for the dictionaries), ``idx_to_node`` (use ``nodes[idx]``) and the
+    deprecated ``sample``/``sampleset_to_tensor`` methods are removed. ``edge_idx_i``/
+    ``edge_idx_j`` hold the smaller/larger node index of each edge irrespective of the orientation
+    given at construction. Duplicate nodes or edges, unknown edge endpoints and unknown hidden nodes
+    raise ``ValueError``.
+  - |
+    The parameters of ``GraphRestrictedBoltzmannMachine`` are registered under their public
+    names, and the index buffers (``edge_idx_i``, ``edge_idx_j``, ``visible_idx`` and
+    ``hidden_idx``) are derived from the constructor arguments and not saved, so the keys of
+    ``state_dict()`` are ``linear`` and ``quadratic``; checkpoints saved with earlier versions
+    cannot be loaded. ``nodes``, ``edges``, ``hidden_nodes`` and ``visible_nodes`` are tuples.
+  - |
+    ``quasi_objective(s_data, s_model)`` no longer takes ``kind``, ``sampler``, ``prefactor``,
+    ``linear_range``, ``quadratic_range`` or ``sample_kwargs``: data of a model with hidden units
+    is completed beforehand with ``conditional_expectation`` (formerly ``kind="exact-disc"``) or
+    with conditional samples of the hidden units drawn by a sampler (formerly
+    ``kind="sampling"``), and the sampling arguments moved to ``DimodSampler``. The objective is a
+    0-d tensor.
+  - |
     ``randspin`` and the ``dwave.plugins.torch.tensor`` module are removed; it was
     ``2 * torch.randint(0, 2, size) - 1``.
 fixes:
+  - |
+    The random initialisation of the quadratic biases of ``GraphRestrictedBoltzmannMachine`` put
+    every model in the spin-glass phase at unit inverse temperature (an effective coupling of 2.5
+    against a transition at 1), while its docstring claimed the paramagnetic phase. The standard
+    deviation of the bias of edge ``(u, v)`` is now ``1 / (init_temperature * (deg(u) deg(v)) ** 0.25)``,
+    where the new constructor argument ``init_temperature`` is the initial temperature in units of
+    the model's critical temperature. Its default of 4 reproduces Hinton's standard deviation of
+    0.01 on a 784-by-500 restricted Boltzmann machine and keeps Zephyr and Pegasus graphs far
+    inside the paramagnetic phase.
+  - |
+    Effective fields of hidden units were wrong whenever a hidden node was the first endpoint of
+    some edges and the second endpoint of others (neighbours were paired with the wrong weights), and
+    were ``NaN`` for models with connected hidden units.
+  - |
+    Conditional sampling of hidden units did not scale the effective fields by ``prefactor`` and
+    ignored ``num_occurrences``; sampling the hidden units for the quasi-objective failed with the
+    default arguments.
   - |
     The ``Ising`` layer ignored ``num_occurrences`` of aggregated sample sets, which a QPU returns
     by default, so repeated reads counted once in its outputs and gradients, and it failed when

@@ -25,6 +25,7 @@ from dwave.plugins.torch.models.losses.kl_divergence import pseudo_kl_divergence
 from dwave.plugins.torch.nn.functional import maximum_mean_discrepancy_loss as mmd_loss
 from dwave.plugins.torch.nn.modules.kernels import GaussianKernel
 from dwave.plugins.torch.nn.modules.loss import MaximumMeanDiscrepancyLoss as MMDLoss
+from dwave.plugins.torch.samplers import DimodSampler
 from dwave.samplers import SimulatedAnnealingSampler
 
 
@@ -153,15 +154,10 @@ class TestDiscreteVariationalAutoencoder(unittest.TestCase):
             optimiser.zero_grad()
             _, discretes, _ = dvae(self.data, n_samples=1)
             discretes = discretes.reshape(discretes.shape[0], -1)
-            prior_samples = self.fixed_boltzmann_machine.sample(
-                sampler=self.sampler_sa,
-                as_tensor=True,
-                device=discretes.device,
-                prefactor=1.0,
-                linear_range=None,
-                quadratic_range=None,
-                sample_params=dict(num_sweeps=10, seed=1234, num_reads=100),
-            )
+            prior_samples = DimodSampler(
+                self.fixed_boltzmann_machine, self.sampler_sa, prefactor=1.0,
+                sample_kwargs=dict(num_sweeps=10, seed=1234, num_reads=100),
+            ).sample().to(discretes.device)
             if use_mmd_loss_class:
                 if mmd_loss_module is None:
                     mmd_loss_module = MMDLoss(kernel)
@@ -197,12 +193,10 @@ class TestDiscreteVariationalAutoencoder(unittest.TestCase):
 
             discretes = discretes.reshape(discretes.shape[0], -1)
             latents = latents.reshape(latents.shape[0], -1)
-            samples = self.boltzmann_machine.sample(
-                self.sampler_sa,
-                as_tensor=True,
-                prefactor=1.0,
-                sample_params=dict(num_sweeps=10, seed=1234, num_reads=100),
-            )
+            samples = DimodSampler(
+                self.boltzmann_machine, self.sampler_sa, prefactor=1.0,
+                sample_kwargs=dict(num_sweeps=10, seed=1234, num_reads=100),
+            ).sample()
             kl_loss = pseudo_kl_divergence_loss(
                 discretes,
                 latents,
