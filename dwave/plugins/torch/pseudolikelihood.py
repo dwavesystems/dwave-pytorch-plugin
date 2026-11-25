@@ -174,11 +174,11 @@ def negative_log_pseudolikelihood(
         raise ValueError(f'reduction must be "mean", "sum" or "none", got {reduction!r}.')
     graph.validate_spins(spins, graph.validate_biases(linear, quadratic))
     spins = spins.to(device=linear.device, dtype=linear.dtype)
+    # The conditional probability of a spin is the sigmoid of minus its excitation energy, so
+    # its negative log is the softplus of the excitation energy
     couplings = _couplings(graph, linear, quadratic, dense)
-    fields = graph.effective_field(spins, linear=linear, **couplings)
-    # The conditional probability of a spin is sigmoid(-2 s theta), whose negative log is
-    # log(1 + exp(2 s theta)) = softplus(2 s theta)
-    values = F.softplus(2.0 * spins * fields).sum(-1)
+    excitations = graph.excitation_energies(spins, linear=linear, **couplings)
+    values = F.softplus(excitations).sum(-1)
     if reduction == "mean":
         return values.mean(-1)
     if reduction == "sum":
@@ -358,10 +358,11 @@ def fit_pseudolikelihood(
             s = spins[start:start + chunk].to(device=device, dtype=dtype)
             # Rebuilt per chunk: each chunk's backward pass frees the graph of the couplings
             couplings = _couplings(graph, linear, quadratic, dense)
-            fields = graph.effective_field(s, linear=linear, **couplings)
             # p(s_i | rest) = exp(-s_i theta_i) / (exp(-theta_i) + exp(theta_i))
-            #              = 1 / (1 + exp(2 s_i theta_i)), so -log p = softplus(2 s_i theta_i)
-            chunk_nlpl = F.softplus(2.0 * s * fields).sum() / num_samples
+            #              = 1 / (1 + exp(eps_i)), eps_i = 2 s_i theta_i the excitation energy,
+            # so -log p = softplus(eps_i)
+            excitations = graph.excitation_energies(s, linear=linear, **couplings)
+            chunk_nlpl = F.softplus(excitations).sum() / num_samples
             chunk_nlpl.backward()
             nlpl += chunk_nlpl.detach()
         last_nlpl = float(nlpl)
