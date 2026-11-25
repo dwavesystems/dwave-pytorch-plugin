@@ -40,8 +40,8 @@ class TestDimodSampler(unittest.TestCase):
         h = [0.0, 1, 2, 3]
 
         bm = GRBM(self.nodes, self.edges)
-        bm._linear.data = torch.tensor(h, dtype=dtype)
-        bm._quadratic.data = torch.tensor([1, 2, 3, 6], dtype=dtype)
+        bm.linear.data = torch.tensor(h, dtype=dtype)
+        bm.quadratic.data = torch.tensor([1, 2, 3, 6], dtype=dtype)
 
         self.bm = bm
 

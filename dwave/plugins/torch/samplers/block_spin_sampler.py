@@ -238,7 +238,7 @@ class BlockSampler(TorchSampler):
             adjacency_dict[u].append(v)
             edge_to_idx[u, v] = idx
             edge_to_idx[v, u] = idx
-        for u in self._grbm.idx_to_node:
+        for u in range(self._grbm.n_nodes):
             neighbours = adjacency_dict[u]
             adj_weight_idxs = [edge_to_idx[u, v] for v in neighbours]
             num_neighbours = len(neighbours)

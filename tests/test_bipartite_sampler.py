@@ -95,8 +95,8 @@ class TestBipartiteGibbsSampler(unittest.TestCase):
         grbm = GRBM(nodes, edges, hidden_nodes=["h1", "h2"])
 
         # Set parameters manually
-        grbm._linear.data = torch.tensor([0.1, -0.2, 0.3, -0.4])
-        grbm._quadratic.data = torch.tensor([0.5, 0.2, -0.7, 0.6])
+        grbm.linear.data = torch.tensor([0.1, -0.2, 0.3, -0.4])
+        grbm.quadratic.data = torch.tensor([0.5, 0.2, -0.7, 0.6])
 
         sampler = BipartiteGibbsSampler(grbm, num_chains=1, schedule=[1.0])
 
@@ -174,8 +174,8 @@ class TestBipartiteGibbsSampler(unittest.TestCase):
         grbm = GRBM(nodes, edges, hidden_nodes=["h1", "h2"])
 
         # Set parameters manually
-        grbm._linear.data = torch.tensor([0.1, -0.2, 0.3, -0.4])
-        grbm._quadratic.data = torch.tensor([0.5, 0.2, -0.7, 0.6])
+        grbm.linear.data = torch.tensor([0.1, -0.2, 0.3, -0.4])
+        grbm.quadratic.data = torch.tensor([0.5, 0.2, -0.7, 0.6])
 
         # Create two samplers with a fixed random seed
         sampler1 = BipartiteGibbsSampler(grbm, num_chains=5, schedule=[1.0, 2.0], seed=42)

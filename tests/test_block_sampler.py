@@ -148,8 +148,8 @@ class TestBlockSampler(unittest.TestCase):
         # Manually set the parameter weights for testing
         dtype = torch.float32
         grbm = GRBM(self.nodes, self.edges)
-        grbm._linear.data = torch.tensor([0.0, 1.0, 2.0, 3.0], dtype=dtype)
-        grbm._quadratic.data = torch.tensor([1.1, 2.2, 3.3, 6.6], dtype=dtype)
+        grbm.linear.data = torch.tensor([0.0, 1.0, 2.0, 3.0], dtype=dtype)
+        grbm.quadratic.data = torch.tensor([1.1, 2.2, 3.3, 6.6], dtype=dtype)
 
         def crayon(v):
             if v == "a":
@@ -196,8 +196,8 @@ class TestBlockSampler(unittest.TestCase):
         # Manually set the parameter weights for testing
         dtype = torch.float32
         grbm = GRBM(self.nodes, self.edges)
-        grbm._linear.data = torch.tensor([0.0, 1.0, 2.0, 3.0], dtype=dtype)
-        grbm._quadratic.data = torch.tensor([1.1, 2.2, 3.3, 6.6], dtype=dtype)
+        grbm.linear.data = torch.tensor([0.0, 1.0, 2.0, 3.0], dtype=dtype)
+        grbm.quadratic.data = torch.tensor([1.1, 2.2, 3.3, 6.6], dtype=dtype)
 
         def crayon(v):
             if v == "a":
@@ -236,7 +236,7 @@ class TestBlockSampler(unittest.TestCase):
         bss = BlockSampler(grbm, crayon, 10, [1.0], seed=5)
         # Check every block is indeed coloured correctly
         for block in bss._partition:
-            self.assertEqual(1, len({crayon(grbm.idx_to_node[bidx]) for bidx in block.tolist()}))
+            self.assertEqual(1, len({crayon(grbm.nodes[bidx]) for bidx in block.tolist()}))
         # Check every node has been included
         self.assertSetEqual({idx for block in bss._partition for idx in block.tolist()},
                             {bss._grbm.node_to_idx[node] for node in bss._grbm.nodes})

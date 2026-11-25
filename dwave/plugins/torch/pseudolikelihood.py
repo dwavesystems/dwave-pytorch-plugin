@@ -32,11 +32,14 @@ Three functions share the objective:
 * :func:`negative_log_pseudolikelihood` evaluates it under given biases, for a single model or
   a batch of models and differentiably in the biases, as a training loss or a diagnostic.
 * :func:`fit_pseudolikelihood` minimizes it over all the biases of one model with L-BFGS in
-  float64 and returns the estimate with diagnostics.
+  float64 and returns the estimate with diagnostics;
+  :meth:`~dwave.plugins.torch.models.GraphRestrictedBoltzmannMachine.fit_pseudolikelihood`
+  writes it into a model.
 * :func:`fit_inverse_temperature` holds the biases fixed as a reference Hamiltonian
   :math:`E^*` and minimizes it over the single scale :math:`\beta` of the family
   :math:`P_\beta(s) \propto \exp\{-\beta E^*(s)\}`, the inverse temperature at which the spins
   were sampled, by Newton's method, for a batch of models at once and with a standard error.
+  :meth:`~dwave.plugins.torch.models.GraphRestrictedBoltzmannMachine.estimate_beta` wraps it.
 
 The two fits compose: on data drawn at inverse temperature :math:`\beta` from :math:`E^*`, the
 joint fit recovers :math:`\beta E^*` while the one-parameter fit against :math:`E^*` recovers
@@ -285,7 +288,10 @@ def fit_pseudolikelihood(
     exactly to zero, and the first-order ``converged`` reading is approximate near kinks.
 
     Args:
-        graph (GraphIndex): The graph of the model.
+        graph (GraphIndex): The graph of the model, for example a
+            :class:`~dwave.plugins.torch.models.GraphRestrictedBoltzmannMachine` whose biases
+            are ignored (:meth:`~dwave.plugins.torch.models.GraphRestrictedBoltzmannMachine.fit_pseudolikelihood`
+            writes the estimate into the model).
         spins (torch.Tensor): ``±1`` configurations of shape ``(num_samples, n_nodes)``, one
             column per node in the order of the graph's nodes.
         max_iter (int): Maximum L-BFGS iterations. Defaults to 500.

@@ -1,4 +1,0 @@
----
-features:
-  - |
-    GraphRestrictedBoltzmannMachine now records its constructor arguments in config.

@@ -42,27 +42,22 @@ def run():
 
     for iteration, x in enumerate(X):    
         # Positive phase: clamp visible, sample hidden
-        full_obs = torch.full((batch_size, grbm.n_nodes), float("nan"))
-        full_obs[:, grbm.visible_idx] = x
-        obs = sampler.sample(full_obs)
-        
+        obs = sampler.sample(grbm.pad_visible(x))
+
         # Negative phase: sample from the model
         s_model = sampler.sample()
 
         optimizer.zero_grad()
 
-        # Compute a quasi-objective function
-        loss = (
-            grbm.sufficient_statistics(obs).mean(0, True)
-            - grbm.sufficient_statistics(s_model).mean(0, True)
-        ) @ grbm.theta
+        # Compute a quasi-objective function whose gradient is that of the negative log likelihood
+        loss = grbm.quasi_objective(obs, s_model)
 
         loss.backward()
         optimizer.step()
 
         avg_grad = (
-            grbm._linear.grad.abs().mean()
-            + grbm._quadratic.grad.abs().mean()
+            grbm.linear.grad.abs().mean()
+            + grbm.quadratic.grad.abs().mean()
         ) / 2
 
         print(f"Iteration {iteration:3d} | "f"Average |gradient|: {avg_grad.item():.2f}")

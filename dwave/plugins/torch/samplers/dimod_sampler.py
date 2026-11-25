@@ -22,7 +22,7 @@ from hybrid.composers import AggregatedSamples
 
 from dwave.plugins.torch.models.boltzmann_machine import GraphRestrictedBoltzmannMachine
 from dwave.plugins.torch.samplers.base import TorchSampler
-from dwave.plugins.torch.utils import sampleset_to_tensor
+from dwave.plugins.torch.utils import sampleset_to_tensor, to_bqm
 
 if TYPE_CHECKING:
     import dimod
@@ -106,7 +106,7 @@ class DimodSampler(TorchSampler):
         device = self._grbm.linear.device
         n_nodes = self._grbm.n_nodes
 
-        h, J = self._grbm.to_ising(self._prefactor, self._linear_range, self._quadratic_range)
+        h, J = self._to_ising()
 
         # Unconditional sampling
         if x is None:
@@ -181,6 +181,16 @@ class DimodSampler(TorchSampler):
         # Stack to get (batch_size, num_reads, n_nodes)
         samples = torch.stack(results, dim=0)
         return samples
+
+    def _to_ising(self) -> tuple[dict, dict]:
+        """The model's biases scaled by the prefactor and clipped to the ranges, as dimod Ising
+        dictionaries keyed by the nodes and by the edges of the model (in their given orientation).
+        """
+        bqm = to_bqm(self._grbm, self._grbm.linear, self._grbm.quadratic,
+                     self._prefactor, self._linear_range, self._quadratic_range)
+        h = {node: float(bqm.get_linear(node)) for node in self._grbm.nodes}
+        J = {(u, v): float(bqm.get_quadratic(u, v)) for u, v in self._grbm.edges}
+        return h, J
 
     def _sampleset_to_tensor(self, sample_set: dimod.SampleSet, device: torch.device | None = None) -> torch.Tensor:
         """Converts a ``dimod.SampleSet`` to a ``torch.Tensor`` using GRBM node order.
