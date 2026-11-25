@@ -86,8 +86,15 @@ def planted_sample(num_samples: int, beta: float = 1.0) -> torch.Tensor:
 
 
 def ocean_biases(graph, spins):
-    """dwave-system's maximum pseudolikelihood estimate of every bias, from one binary quadratic
-    model per bias; it fits the exponent of ``exp(x H)``, so the biases are ``-x``."""
+    """dwave-system's maximum pseudolikelihood estimate of every bias of the model on ``graph``.
+
+    ``maximum_pseudolikelihood`` fits the coefficients ``x`` of a sum of given binary quadratic
+    models, so the models declare the parameters: one with a unit linear bias on a node, for
+    that node's bias, and one with a unit quadratic bias on an edge, for that edge's, with every
+    node present (at zero) so that all of them line up with the columns of the sample. The sum
+    is then the Ising energy with biases ``x``, and the fit is the joint maximum pseudolikelihood
+    estimate by SciPy's optimizer. dwave-system fits the exponent of ``exp(x H)`` rather than
+    ``exp(-H)``, so the biases are ``-x``."""
     bqms = [dimod.BQM.from_ising({node: 1.0}, {}) for node in graph.nodes]
     bqms += [dimod.BQM.from_ising({}, {edge: 1.0}) for edge in graph.edges]
     for bqm in bqms:
@@ -186,10 +193,16 @@ class TestFitInverseTemperature(unittest.TestCase):
             torch.testing.assert_close(fit32.beta, fit.beta, rtol=1e-5, atol=1e-6)
 
     def test_single_spin_analytic(self):
-        # One spin under the field 0.5, observed down three times and up once: the derivative of
-        # the NLPL vanishes where sigmoid(beta) = 3 sigmoid(-beta), i.e. at beta = log(3). The
-        # scores are then -1/4 (down) and 3/4 (up), of variance 1/4, and the curvature is
-        # sigmoid(log 3) sigmoid(-log 3) = 3/16, so the standard error is (1/4) / (3/16) = 4/3.
+        # One spin under the field h = 1/2, observed down three times and up once, so that the
+        # excitation energies 2 h s are the spins themselves. For a single spin the
+        # pseudolikelihood is the likelihood, and its maximum matches the magnetisation of the
+        # model, -tanh(beta h), to the sample's, -1/2: tanh(beta / 2) = 1/2, beta = log(3).
+        # The standard error is the sandwich of fit_inverse_temperature's docstring. With
+        # t = tanh(beta / 2) = 1/2, the score of a spin is s sigmoid(beta s) = (s + t) / 2, half
+        # its deviation from the model's magnetisation: -1/4 for the down spins and 3/4 for the
+        # up one, of mean zero and sample variance (3 (1/4)^2 + (3/4)^2) / 3 = 1/4. The curvature
+        # is sigmoid(beta) sigmoid(-beta) = (1 - t^2) / 4 = 3/16, so the standard error is
+        # sqrt((1/4) / 4) / (3/16) = 4/3.
         spins = torch.tensor([[-1.0], [-1.0], [-1.0], [1.0]])
         fit = fit_inverse_temperature(SINGLE, torch.tensor([0.5]), torch.zeros(0), spins)
         torch.testing.assert_close(fit.beta, torch.tensor(math.log(3.0), dtype=torch.float64))
@@ -229,18 +242,23 @@ class TestFitInverseTemperature(unittest.TestCase):
             torch.testing.assert_close(fit.beta[2], single.beta)
 
     def test_limits(self):
-        # Under the field 0.5, a sample of down spins has no excitation: the zero-temperature
-        # limit. Up spins are all excited, the limit of the opposite sign; and no field at all
-        # leaves beta unidentifiable.
+        # Under the field 0.5, a sample of down spins has no excitation, the zero-temperature
+        # limit; up spins are all excited, the limit of the opposite sign; and no field at all
+        # leaves beta unidentifiable
         linear, quadratic = torch.tensor([0.5]), torch.zeros(0)
-        fit = fit_inverse_temperature(SINGLE, linear, quadratic, -torch.ones(3, 1))
-        self.assertEqual(math.inf, float(fit.beta))
-        self.assertTrue(math.isnan(float(fit.beta_stderr)))
-        self.assertTrue(bool(fit.converged))
-        fit = fit_inverse_temperature(SINGLE, linear, quadratic, torch.ones(3, 1))
-        self.assertEqual(-math.inf, float(fit.beta))
-        with self.assertRaisesRegex(ValueError, "unidentifiable"):
-            fit_inverse_temperature(SINGLE, torch.zeros(1), quadratic, torch.ones(3, 1))
+        with self.subTest("No excitation: zero temperature"):
+            fit = fit_inverse_temperature(SINGLE, linear, quadratic, -torch.ones(3, 1))
+            self.assertEqual(math.inf, float(fit.beta))
+            self.assertTrue(math.isnan(float(fit.beta_stderr)))
+            self.assertTrue(bool(fit.converged))
+        with self.subTest("No relaxed spin: the opposite limit"):
+            fit = fit_inverse_temperature(SINGLE, linear, quadratic, torch.ones(3, 1))
+            self.assertEqual(-math.inf, float(fit.beta))
+            self.assertTrue(math.isnan(float(fit.beta_stderr)))
+            self.assertTrue(bool(fit.converged))
+        with self.subTest("No field: unidentifiable"):
+            with self.assertRaisesRegex(ValueError, "unidentifiable"):
+                fit_inverse_temperature(SINGLE, torch.zeros(1), quadratic, torch.ones(3, 1))
         with self.subTest("Limits and finite estimates coexist in a batch"):
             spins = torch.tensor([[[-1.0], [-1.0]], [[-1.0], [1.0]]])
             fit = fit_inverse_temperature(SINGLE, linear.expand(2, 1), quadratic.expand(2, 0), spins)

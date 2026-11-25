@@ -523,9 +523,16 @@ def fit_inverse_temperature(
     The pseudolikelihood is a composite likelihood, so the sampling variance of the estimate
     takes the sandwich form :math:`\mathrm{Var}(u) / (M\, \mathrm{NLPL}''(\beta)^2)` with
     :math:`u_s = \sum_i \epsilon_i(s)\, \sigma(\beta \epsilon_i(s))` the score of each
-    configuration, of mean zero at the estimate, and :math:`\mathrm{NLPL}''` the mean curvature.
-    It treats the configurations as independent draws; for an autocorrelated Markov chain, thin
-    the chain or scale by its effective sample size.
+    configuration, of mean zero at the estimate, and :math:`\mathrm{NLPL}''` the mean curvature:
+    the Godambe information of the estimating equation (V. P. Godambe, *An Optimum Property of
+    Regular Maximum Likelihood Estimation*, Ann. Math. Stat. 31, 1960), the standard variance of
+    composite likelihood estimates (C. Varin, N. Reid and D. Firth, *An Overview of Composite
+    Likelihood Methods*, Statistica Sinica 21, 2011). For a true likelihood under a correct model
+    the score variance equals the curvature and the form reduces to the inverse Fisher
+    information; the conditional scores of the spins of one configuration break that identity
+    by their cross-terms, so the two factors are kept apart. The form treats the configurations
+    as independent draws; for an autocorrelated Markov chain, thin the chain or scale by its
+    effective sample size.
 
     Args:
         graph (GraphIndex): The graph of the models.
