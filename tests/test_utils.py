@@ -84,10 +84,13 @@ class TestToBqm(unittest.TestCase):
             )
 
         with self.subTest("Clipping after scaling"):
-            bqm = to_bqm(graph, linear, quadratic, 1, [-0.1, 1.5], [-0.05, 3])
-            for expected, node in zip([-0.1, 0, 1, 1.5], graph.nodes):
+            # Scaled by 2, the linear biases -3, 0, 1, 3 become -6, 0, 2, 6 and clip to -0.1, 0,
+            # 1.5, 1.5; clipped first, they would end at -0.2, 0, 2, 3. Likewise the quadratic
+            # biases -1, 1, 2, 0 end at -0.05, 2, 3, 0 rather than -0.1, 2, 4, 0.
+            bqm = to_bqm(graph, linear, quadratic, 2, [-0.1, 1.5], [-0.05, 3])
+            for expected, node in zip([-0.1, 0, 1.5, 1.5], graph.nodes):
                 self.assertAlmostEqual(expected, bqm.get_linear(node), places=6)
-            for expected, (u, v) in zip([-0.05, 1, 2, 0], graph.edges):
+            for expected, (u, v) in zip([-0.05, 2, 3, 0], graph.edges):
                 self.assertAlmostEqual(expected, bqm.get_quadratic(u, v), places=6)
 
         with self.subTest("Edgeless"):
