@@ -197,6 +197,11 @@ class TestGraphIndex(unittest.TestCase):
         self.assertEqual((0,), tuple(graph.edge_idx_i.shape))
         self.assertListEqual([0, 0], graph.degrees().tolist())
         self.assertDictEqual({}, graph.edge_to_idx)
+        torch.testing.assert_close(graph.quadratic_matrix(torch.zeros(0)), torch.zeros(2, 2))
+        with self.subTest("The energy is the linear term alone"):
+            spins, linear = torch.tensor([[1.0, -1.0], [1.0, 1.0]]), torch.tensor([0.5, 2.0])
+            energies = graph.energy(spins, linear, torch.zeros(0))
+            torch.testing.assert_close(energies, torch.tensor([-1.5, 2.5]))
 
     def test_validation(self):
         with self.assertRaisesRegex(ValueError, "duplicate entries"):
